@@ -1,0 +1,26 @@
+[project]
+name = "qql-cli"
+version = "0.1.0"
+description = "A SQL-like query language CLI wrapper for Qdrant vector database"
+requires-python = ">=3.12"
+dependencies = [
+    "qdrant-client[fastembed]>=1.13.0",
+    "click>=8.1.0",
+    "rich>=13.0.0",
+]
+
+[project.scripts]
+qql = "qql.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/qql"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-mock>=3.14.0",
+]
