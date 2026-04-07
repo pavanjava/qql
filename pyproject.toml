@@ -2,12 +2,42 @@
 name = "qql-cli"
 version = "0.1.0"
 description = "A SQL-like query language CLI wrapper for Qdrant vector database"
+readme = "README.md"
+license = { file = "LICENSE" }
 requires-python = ">=3.12"
+authors = [
+    { name = "Kameshwara Pavan Kumar Mantha", email = "pavankumarmantha@gmail.com" },
+]
+keywords = [
+    "qdrant",
+    "vector-database",
+    "cli",
+    "query-language",
+    "embeddings",
+    "semantic-search",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Database :: Front-Ends",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
 dependencies = [
     "qdrant-client[fastembed]>=1.13.0",
     "click>=8.1.0",
     "rich>=13.0.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/pavanjava/qql"
+Repository = "https://github.com/pavanjava/qql"
+"Bug Tracker" = "https://github.com/pavanjava/qql/issues"
 
 [project.scripts]
 qql = "qql.cli:main"
@@ -23,4 +53,5 @@ packages = ["src/qql"]
 dev = [
     "pytest>=8.0.0",
     "pytest-mock>=3.14.0",
+    "twine>=6.2.0",
 ]
