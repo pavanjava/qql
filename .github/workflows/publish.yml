@@ -1,0 +1,101 @@
+name: Publish to PyPI
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish_to_pypi:
+        description: 'Publish to PyPI? Type "yes" to confirm'
+        required: true
+        default: 'no'
+        type: choice
+        options:
+          - 'no'
+          - 'yes'
+      version_tag:
+        description: 'Version tag (e.g., v0.1.0)'
+        required: false
+        type: string
+
+jobs:
+  test:
+    name: Run tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: uv sync --group dev
+
+      - name: Run tests
+        run: uv run pytest tests/ -v
+
+  build-and-publish:
+    name: Build and Publish
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build tools
+        run: pip install twine
+
+      - name: Build package
+        run: uv build
+
+      - name: Check package
+        run: |
+          twine check dist/*
+          ls -la dist/
+          echo "📦 Package version: $(python -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])")"
+
+      - name: Confirm before publish
+        if: github.event.inputs.publish_to_pypi == 'yes'
+        run: |
+          echo "⚠️  About to publish to PyPI (PRODUCTION)"
+          echo "📦 Package contents:"
+          ls -la dist/
+          echo "✅ Proceeding with PyPI upload..."
+
+      - name: Publish to PyPI
+        if: github.event.inputs.publish_to_pypi == 'yes'
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
+        run: |
+          if [ -z "$TWINE_PASSWORD" ]; then
+            echo "❌ Error: PYPI_TOKEN secret is not configured!"
+            echo "Please add your PyPI token to GitHub Secrets"
+            exit 1
+          fi
+          twine upload dist/*
+          echo "✅ Published to PyPI successfully!"
+          echo "📦 View at: https://pypi.org/project/qql-cli/"
+          echo "📥 Install: pip install qql-cli"
+
+      - name: Skip publish message
+        if: github.event.inputs.publish_to_pypi != 'yes'
+        run: |
+          echo "📦 Package built successfully but NOT published to PyPI"
+          echo "ℹ️  Test run complete. To publish, re-run with 'yes' selected."
