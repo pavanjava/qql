@@ -1,16 +1,16 @@
 # QQL — Qdrant Query Language
 
-A SQL-like CLI for [Qdrant](https://qdrant.tech), a high-performance vector database. Instead of writing Python SDK calls, you write natural query statements to insert, search, manage, and delete vector data.
+A SQL-like CLI for [Qdrant](https://qdrant.tech), a high-performance vector database. Instead of writing Python SDK calls, you write natural query statements to insert, search, manage, and delete vector data — including rich SQL-style `WHERE` filters.
 
 ```
-qql> INSERT INTO COLLECTION notes VALUES {'text': 'Qdrant is a vector database', 'author': 'alice'}
+qql> INSERT INTO COLLECTION notes VALUES {'text': 'Qdrant is a vector database', 'author': 'alice', 'year': 2024}
 ✓ Inserted 1 point [3f2e1a4b-8c91-4d0e-b123-abc123def456]
 
-qql> SEARCH notes SIMILAR TO 'vector storage engines' LIMIT 3
-✓ Found 2 result(s)
+qql> SEARCH notes SIMILAR TO 'vector storage engines' LIMIT 3 WHERE year >= 2023
+✓ Found 1 result(s)
  Score  │ ID                                   │ Payload
 ────────┼──────────────────────────────────────┼──────────────────────────────────────
- 0.8931 │ 3f2e1a4b-8c91-4d0e-b123-abc123def456 │ {'text': 'Qdrant is a ...', 'author': 'alice'}
+ 0.8931 │ 3f2e1a4b-8c91-4d0e-b123-abc123def456 │ {'text': 'Qdrant is a ...', 'author': 'alice', 'year': 2024}
 ```
 
 ---
@@ -24,6 +24,7 @@ qql> SEARCH notes SIMILAR TO 'vector storage engines' LIMIT 3
 - [All QQL Operations](#all-qql-operations)
   - [INSERT — add a point](#insert--add-a-point)
   - [SEARCH — find similar points](#search--find-similar-points)
+  - [WHERE Clause Filters](#where-clause-filters)
   - [SHOW COLLECTIONS — list collections](#show-collections--list-collections)
   - [CREATE COLLECTION — create a collection](#create-collection--create-a-collection)
   - [DROP COLLECTION — delete a collection](#drop-collection--delete-a-collection)
@@ -59,6 +60,8 @@ Your query string
 ```
 
 When you run `INSERT`, the `text` field in your dictionary is automatically converted into a dense vector using [Fastembed](https://github.com/qdrant/fastembed). The vector and the rest of your fields (stored as payload) are then upserted into Qdrant together. You never have to manage vectors manually.
+
+`SEARCH` also embeds your query text and finds the nearest vectors by cosine similarity. An optional `WHERE` clause lets you pre-filter the candidate set using any payload field before similarity ranking — exactly like a SQL `WHERE` on top of a vector search.
 
 ---
 
@@ -195,7 +198,7 @@ Insert with a specific embedding model:
 INSERT INTO COLLECTION articles VALUES {'text': 'hello world'} USING MODEL 'BAAI/bge-small-en-v1.5'
 ```
 
-Insert with nested metadata:
+Insert with nested metadata and tags:
 ```sql
 INSERT INTO COLLECTION articles VALUES {
   'text': 'Attention is all you need',
@@ -221,10 +224,13 @@ INSERT INTO COLLECTION articles VALUES {
 
 Performs a **semantic similarity search**: your query text is embedded with the same model used during insert, then Qdrant finds the nearest vectors by cosine distance.
 
+An optional `WHERE` clause filters the candidate set **before** similarity ranking so you only get results that match both the semantic query and the payload conditions.
+
 **Syntax:**
 ```
 SEARCH <collection_name> SIMILAR TO '<query_text>' LIMIT <n>
 SEARCH <collection_name> SIMILAR TO '<query_text>' LIMIT <n> USING MODEL '<model_name>'
+SEARCH <collection_name> SIMILAR TO '<query_text>' LIMIT <n> [USING MODEL '<model_name>'] WHERE <filter>
 ```
 
 **Examples:**
@@ -234,9 +240,19 @@ Basic search, return top 5 results:
 SEARCH articles SIMILAR TO 'machine learning algorithms' LIMIT 5
 ```
 
-Search with a specific model:
+Search only papers published after 2020:
 ```sql
-SEARCH articles SIMILAR TO 'deep learning' LIMIT 10 USING MODEL 'BAAI/bge-small-en-v1.5'
+SEARCH articles SIMILAR TO 'deep learning' LIMIT 10 WHERE year > 2020
+```
+
+Search within a specific category, excluding drafts:
+```sql
+SEARCH articles SIMILAR TO 'neural networks' LIMIT 5 WHERE category = 'ml' AND status != 'draft'
+```
+
+Search with a model override and a filter:
+```sql
+SEARCH articles SIMILAR TO 'embeddings' LIMIT 10 USING MODEL 'BAAI/bge-small-en-v1.5' WHERE year >= 2022
 ```
 
 **Output:**
@@ -255,6 +271,165 @@ Results are displayed as a table with three columns:
 - **Payload** — all fields stored alongside the vector.
 
 **Important:** Use the same model for SEARCH as you used for INSERT. Mixing models produces meaningless scores because the vectors live in different spaces.
+
+---
+
+### WHERE Clause Filters
+
+The `WHERE` clause lets you filter on any payload field using SQL-style predicates. All standard comparison, range, membership, null-check, and full-text operators are supported.
+
+#### Equality and inequality
+
+```sql
+-- Exact match
+SEARCH articles SIMILAR TO 'ml' LIMIT 10 WHERE category = 'paper'
+
+-- Not equal
+SEARCH articles SIMILAR TO 'ml' LIMIT 10 WHERE status != 'draft'
+```
+
+#### Range comparisons
+
+```sql
+-- Greater than / less than
+SEARCH articles SIMILAR TO 'ai' LIMIT 5 WHERE score > 0.8
+SEARCH articles SIMILAR TO 'ai' LIMIT 5 WHERE year < 2024
+
+-- Greater than or equal / less than or equal
+SEARCH articles SIMILAR TO 'ai' LIMIT 5 WHERE score >= 0.75
+SEARCH articles SIMILAR TO 'ai' LIMIT 5 WHERE year <= 2023
+```
+
+#### BETWEEN … AND
+
+```sql
+-- Inclusive range (equivalent to year >= 2018 AND year <= 2023)
+SEARCH articles SIMILAR TO 'history of ai' LIMIT 10 WHERE year BETWEEN 2018 AND 2023
+```
+
+#### IN and NOT IN
+
+```sql
+-- Field value must be one of the listed values
+SEARCH articles SIMILAR TO 'retrieval' LIMIT 10 WHERE status IN ('published', 'reviewed')
+
+-- Field value must not be any of the listed values
+SEARCH articles SIMILAR TO 'retrieval' LIMIT 10 WHERE status NOT IN ('deleted', 'archived')
+
+-- Trailing commas are allowed
+SEARCH articles SIMILAR TO 'x' LIMIT 5 WHERE status IN ('a', 'b',)
+```
+
+#### IS NULL and IS NOT NULL
+
+```sql
+-- Points where the reviewer field is absent or explicitly null
+SEARCH articles SIMILAR TO 'peer review' LIMIT 5 WHERE reviewer IS NULL
+
+-- Points where reviewer is set to any non-null value
+SEARCH articles SIMILAR TO 'peer review' LIMIT 5 WHERE reviewer IS NOT NULL
+```
+
+#### IS EMPTY and IS NOT EMPTY
+
+```sql
+-- Points where the tags list is empty
+SEARCH articles SIMILAR TO 'untagged' LIMIT 5 WHERE tags IS EMPTY
+
+-- Points where the tags list has at least one element
+SEARCH articles SIMILAR TO 'categorized' LIMIT 5 WHERE tags IS NOT EMPTY
+```
+
+#### Full-text MATCH
+
+```sql
+-- All terms in the string must appear in the field (full-text index required)
+SEARCH articles SIMILAR TO 'search' LIMIT 10 WHERE title MATCH 'vector database'
+
+-- Any term in the string can match
+SEARCH articles SIMILAR TO 'search' LIMIT 10 WHERE title MATCH ANY 'embedding retrieval'
+
+-- The exact phrase must appear
+SEARCH articles SIMILAR TO 'search' LIMIT 10 WHERE title MATCH PHRASE 'semantic search'
+```
+
+> Full-text MATCH requires a Qdrant full-text index on the field. Create one in the Qdrant dashboard or via the SDK before using MATCH filters.
+
+#### AND, OR, NOT — logical operators
+
+Operator precedence: `NOT` (highest) > `AND` > `OR` (lowest). Use parentheses to override.
+
+```sql
+-- AND: both conditions must be true
+SEARCH articles SIMILAR TO 'nlp' LIMIT 10 WHERE category = 'paper' AND year >= 2020
+
+-- OR: either condition can be true
+SEARCH articles SIMILAR TO 'llm' LIMIT 10 WHERE source = 'arxiv' OR source = 'pubmed'
+
+-- NOT: negate a condition
+SEARCH articles SIMILAR TO 'benchmark' LIMIT 10 WHERE NOT status = 'draft'
+
+-- Chained AND (three conditions, all must hold)
+SEARCH articles SIMILAR TO 'deep learning' LIMIT 20
+  WHERE year >= 2019 AND category = 'cv' AND status != 'retracted'
+
+-- Parentheses to group OR inside AND
+SEARCH articles SIMILAR TO 'conference paper' LIMIT 10
+  WHERE (source = 'arxiv' OR source = 'ieee') AND year >= 2022
+
+-- NOT on a parenthesized group
+SEARCH articles SIMILAR TO 'x' LIMIT 5 WHERE NOT (status = 'draft' OR status = 'deleted')
+```
+
+#### Dot-notation for nested fields
+
+Qdrant supports nested payload fields accessed with dot notation. Use the same path syntax in `WHERE`:
+
+```sql
+-- Filter on meta.source nested field
+SEARCH articles SIMILAR TO 'wikipedia' LIMIT 5 WHERE meta.source = 'web'
+
+-- Filter on a deeply nested array field
+SEARCH cities SIMILAR TO 'large city' LIMIT 5 WHERE country.cities[].population > 1000000
+```
+
+#### Combined example
+
+```sql
+-- Semantic search over research papers:
+-- must be from arxiv or IEEE, published 2020–2023, not retracted, with a reviewer assigned
+SEARCH papers SIMILAR TO 'attention mechanism transformers' LIMIT 20
+  WHERE (source = 'arxiv' OR source = 'ieee')
+    AND year BETWEEN 2020 AND 2023
+    AND status != 'retracted'
+    AND reviewer IS NOT NULL
+```
+
+#### Full filter reference
+
+| WHERE syntax | Description |
+|---|---|
+| `field = 'x'` | Exact match |
+| `field != 'x'` | Not equal |
+| `field > n` | Greater than |
+| `field >= n` | Greater than or equal |
+| `field < n` | Less than |
+| `field <= n` | Less than or equal |
+| `field BETWEEN a AND b` | Inclusive range |
+| `field IN ('a', 'b')` | Value in list |
+| `field NOT IN ('a', 'b')` | Value not in list |
+| `field IS NULL` | Field absent or null |
+| `field IS NOT NULL` | Field present and non-null |
+| `field IS EMPTY` | Field is an empty list |
+| `field IS NOT EMPTY` | Field is a non-empty list |
+| `field MATCH 'text'` | All terms present (full-text) |
+| `field MATCH ANY 'text'` | Any term present (full-text) |
+| `field MATCH PHRASE 'text'` | Exact phrase present (full-text) |
+| `A AND B` | Both conditions must hold |
+| `A OR B` | Either condition must hold |
+| `NOT A` | Condition must not hold |
+| `(A OR B) AND C` | Parentheses for grouping |
+| `meta.source = 'x'` | Dot-notation nested field |
 
 ---
 
@@ -373,6 +548,12 @@ INSERT INTO docs VALUES {'text': 'hello'} USING MODEL 'BAAI/bge-small-en-v1.5'
 SEARCH docs SIMILAR TO 'hello' LIMIT 5 USING MODEL 'BAAI/bge-small-en-v1.5'
 ```
 
+`USING MODEL` and `WHERE` can be combined:
+
+```sql
+SEARCH docs SIMILAR TO 'hello' LIMIT 5 USING MODEL 'BAAI/bge-small-en-v1.5' WHERE year >= 2022
+```
+
 ### Commonly available Fastembed models
 
 | Model | Dimensions | Notes |
@@ -410,7 +591,7 @@ The `VALUES` dictionary (and nested dicts) supports these types:
 | Nested dict | `{'key': 'val'}` | Arbitrary nesting |
 | List | `['a', 'b', 1]` | Mixed types allowed |
 
-**Examples of each:**
+**Example using every type:**
 ```sql
 INSERT INTO demo VALUES {
   'text':    'example document',
@@ -468,21 +649,29 @@ QQL can also be used as a Python library without the CLI:
 ```python
 from qql import run_query
 
-# Single query
+# Insert a document
 result = run_query(
-    "INSERT INTO COLLECTION notes VALUES {'text': 'hello world', 'author': 'alice'}",
+    "INSERT INTO COLLECTION notes VALUES {'text': 'hello world', 'author': 'alice', 'year': 2024}",
     url="http://localhost:6333",
 )
 print(result.message)   # "Inserted 1 point [<uuid>]"
 print(result.data)      # {"id": "...", "collection": "notes"}
 
-# Search
+# Basic search
 result = run_query(
     "SEARCH notes SIMILAR TO 'hello' LIMIT 5",
     url="http://localhost:6333",
 )
 for hit in result.data:
     print(hit["score"], hit["id"], hit["payload"])
+
+# Search with a WHERE filter
+result = run_query(
+    "SEARCH notes SIMILAR TO 'hello' LIMIT 5 WHERE year >= 2023 AND author != 'bot'",
+    url="http://localhost:6333",
+)
+for hit in result.data:
+    print(hit["score"], hit["payload"])
 ```
 
 Or use the pipeline directly for more control:
@@ -498,12 +687,13 @@ client = QdrantClient(url="http://localhost:6333")
 config = QQLConfig(url="http://localhost:6333")
 executor = Executor(client, config)
 
-query = "SHOW COLLECTIONS"
+query = "SEARCH articles SIMILAR TO 'deep learning' LIMIT 10 WHERE category = 'cv'"
 tokens = Lexer().tokenize(query)
 node = Parser(tokens).parse()
 result = executor.execute(node)
 
-print(result.data)   # ["notes", "articles", ...]
+for hit in result.data:
+    print(hit["score"], hit["payload"])
 ```
 
 ### ExecutionResult
@@ -541,14 +731,14 @@ qql/
 │       ├── config.py       # QQLConfig dataclass + ~/.qql/config.json I/O
 │       ├── exceptions.py   # QQLError, QQLSyntaxError, QQLRuntimeError
 │       ├── lexer.py        # Tokenizer: string → List[Token]
-│       ├── ast_nodes.py    # Frozen dataclasses for each statement type
+│       ├── ast_nodes.py    # Frozen dataclasses for each statement and filter type
 │       ├── parser.py       # Recursive descent parser: tokens → AST node
 │       ├── embedder.py     # Fastembed wrapper with per-model cache
-│       └── executor.py     # AST node → Qdrant client call
+│       └── executor.py     # AST node → Qdrant client call + filter conversion
 └── tests/
-    ├── test_lexer.py       # Tokenizer unit tests
-    ├── test_parser.py      # Parser unit tests (all 6 statement types)
-    └── test_executor.py    # Executor unit tests (mocked Qdrant client)
+    ├── test_lexer.py       # Tokenizer unit tests (keywords, operators, dot-paths)
+    ├── test_parser.py      # Parser unit tests (all statements + WHERE filters)
+    └── test_executor.py    # Executor unit tests (mocked Qdrant client + filter builders)
 ```
 
 ---
@@ -561,7 +751,7 @@ Tests do not require a running Qdrant instance — the Qdrant client is mocked.
 pytest tests/ -v
 ```
 
-Expected output: **54 tests passing**.
+Expected output: **118 tests passing**.
 
 ---
 
@@ -577,3 +767,5 @@ Expected output: **54 tests passing**.
 | `Unexpected token '...'; expected a QQL statement keyword` | Unrecognized statement | Check the query syntax; QQL does not support SQL SELECT |
 | `Unterminated string literal (at position N)` | A string is missing its closing quote | Close the string with a matching `'` or `"` |
 | `Unexpected character '@' (at position N)` | A character not part of QQL syntax | Remove or quote the offending character |
+| `Expected a filter operator after field '...'` | Unknown operator in WHERE clause | Use one of: `=`, `!=`, `>`, `>=`, `<`, `<=`, `IN`, `NOT IN`, `BETWEEN`, `IS NULL`, `IS NOT NULL`, `IS EMPTY`, `IS NOT EMPTY`, `MATCH` |
+| `Expected ')' ...` | Unclosed parenthesis in WHERE clause | Add the missing `)` to close the group |

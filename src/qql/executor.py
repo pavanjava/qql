@@ -6,14 +6,45 @@ from typing import Any
 
 from qdrant_client import QdrantClient
 from qdrant_client.http.exceptions import UnexpectedResponse
-from qdrant_client.models import Distance, PointStruct, VectorParams
+from qdrant_client.models import (
+    Distance,
+    FieldCondition,
+    Filter,
+    IsEmptyCondition,
+    IsNullCondition,
+    MatchAny,
+    MatchExcept,
+    MatchPhrase,
+    MatchText,
+    MatchTextAny,
+    MatchValue,
+    PayloadField,
+    PointStruct,
+    Range,
+    VectorParams,
+)
 
 from .ast_nodes import (
     ASTNode,
+    AndExpr,
+    BetweenExpr,
+    CompareExpr,
     CreateCollectionStmt,
     DeleteStmt,
     DropCollectionStmt,
+    FilterExpr,
+    InExpr,
     InsertStmt,
+    IsEmptyExpr,
+    IsNotEmptyExpr,
+    IsNotNullExpr,
+    IsNullExpr,
+    MatchAnyExpr,
+    MatchPhraseExpr,
+    MatchTextExpr,
+    NotExpr,
+    NotInExpr,
+    OrExpr,
     SearchStmt,
     ShowCollectionsStmt,
 )
@@ -84,7 +115,6 @@ class Executor:
                 success=True,
                 message=f"Collection '{node.collection}' already exists",
             )
-        # Create with default model dimensions
         embedder = Embedder(self._config.default_model)
         dims = embedder.dimensions
         self._client.create_collection(
@@ -122,11 +152,18 @@ class Executor:
         embedder = Embedder(model_name)
         vector = embedder.embed(node.query_text)
 
+        qdrant_filter: Filter | None = None
+        if node.query_filter is not None:
+            qdrant_filter = self._wrap_as_filter(
+                self._build_qdrant_filter(node.query_filter)
+            )
+
         try:
             response = self._client.query_points(
                 collection_name=node.collection,
                 query=vector,
                 limit=node.limit,
+                query_filter=qdrant_filter,
             )
         except UnexpectedResponse as e:
             raise QQLRuntimeError(f"Qdrant error during SEARCH: {e}") from e
@@ -160,7 +197,100 @@ class Executor:
             message=f"Deleted point '{node.point_id}' from '{node.collection}'",
         )
 
-    # ── Helpers ───────────────────────────────────────────────────────────
+    # ── Filter conversion ─────────────────────────────────────────────────
+
+    def _build_qdrant_filter(self, expr: FilterExpr) -> Any:
+        """Convert a FilterExpr AST node into a Qdrant model object.
+
+        Returns one of: Filter, FieldCondition, IsNullCondition, IsEmptyCondition.
+        Use _wrap_as_filter() to guarantee the top-level result is a Filter.
+        """
+        # ── Logical combinators ───────────────────────────────────────────
+        if isinstance(expr, AndExpr):
+            return Filter(must=[self._build_qdrant_filter(op) for op in expr.operands])
+
+        if isinstance(expr, OrExpr):
+            return Filter(should=[self._build_qdrant_filter(op) for op in expr.operands])
+
+        if isinstance(expr, NotExpr):
+            return Filter(must_not=[self._build_qdrant_filter(expr.operand)])
+
+        # ── Comparison ────────────────────────────────────────────────────
+        if isinstance(expr, CompareExpr):
+            if expr.op == "=":
+                return FieldCondition(
+                    key=expr.field, match=MatchValue(value=expr.value)
+                )
+            if expr.op == "!=":
+                return Filter(
+                    must_not=[
+                        FieldCondition(key=expr.field, match=MatchValue(value=expr.value))
+                    ]
+                )
+            _range_key = {">": "gt", ">=": "gte", "<": "lt", "<=": "lte"}[expr.op]
+            return FieldCondition(
+                key=expr.field, range=Range(**{_range_key: expr.value})
+            )
+
+        # ── BETWEEN ───────────────────────────────────────────────────────
+        if isinstance(expr, BetweenExpr):
+            return FieldCondition(
+                key=expr.field, range=Range(gte=expr.low, lte=expr.high)
+            )
+
+        # ── IN / NOT IN ───────────────────────────────────────────────────
+        if isinstance(expr, InExpr):
+            return FieldCondition(
+                key=expr.field, match=MatchAny(any=list(expr.values))
+            )
+
+        if isinstance(expr, NotInExpr):
+            return FieldCondition(
+                key=expr.field,
+                match=MatchExcept(**{"except": list(expr.values)}),
+            )
+
+        # ── IS NULL / IS NOT NULL ─────────────────────────────────────────
+        if isinstance(expr, IsNullExpr):
+            return IsNullCondition(is_null=PayloadField(key=expr.field))
+
+        if isinstance(expr, IsNotNullExpr):
+            return Filter(
+                must_not=[IsNullCondition(is_null=PayloadField(key=expr.field))]
+            )
+
+        # ── IS EMPTY / IS NOT EMPTY ───────────────────────────────────────
+        if isinstance(expr, IsEmptyExpr):
+            return IsEmptyCondition(is_empty=PayloadField(key=expr.field))
+
+        if isinstance(expr, IsNotEmptyExpr):
+            return Filter(
+                must_not=[IsEmptyCondition(is_empty=PayloadField(key=expr.field))]
+            )
+
+        # ── Full-text MATCH ───────────────────────────────────────────────
+        if isinstance(expr, MatchTextExpr):
+            return FieldCondition(key=expr.field, match=MatchText(text=expr.text))
+
+        if isinstance(expr, MatchAnyExpr):
+            return FieldCondition(
+                key=expr.field, match=MatchTextAny(text_any=expr.text)
+            )
+
+        if isinstance(expr, MatchPhraseExpr):
+            return FieldCondition(
+                key=expr.field, match=MatchPhrase(phrase=expr.text)
+            )
+
+        raise QQLRuntimeError(f"Unknown filter expression type: {type(expr)}")
+
+    def _wrap_as_filter(self, qdrant_expr: Any) -> Filter:
+        """Ensure the top-level expression is a Filter (required by query_points)."""
+        if isinstance(qdrant_expr, Filter):
+            return qdrant_expr
+        return Filter(must=[qdrant_expr])
+
+    # ── Collection helpers ────────────────────────────────────────────────
 
     def _ensure_collection(self, name: str, vector_size: int) -> None:
         """Create the collection if it doesn't exist. Raises on dimension mismatch."""

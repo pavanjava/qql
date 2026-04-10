@@ -1,10 +1,24 @@
 import pytest
 
 from qql.ast_nodes import (
+    AndExpr,
+    BetweenExpr,
+    CompareExpr,
     CreateCollectionStmt,
     DeleteStmt,
     DropCollectionStmt,
+    InExpr,
     InsertStmt,
+    IsEmptyExpr,
+    IsNotEmptyExpr,
+    IsNotNullExpr,
+    IsNullExpr,
+    MatchAnyExpr,
+    MatchPhraseExpr,
+    MatchTextExpr,
+    NotExpr,
+    NotInExpr,
+    OrExpr,
     SearchStmt,
     ShowCollectionsStmt,
 )
@@ -132,3 +146,183 @@ class TestErrors:
     def test_empty_input(self):
         with pytest.raises(QQLSyntaxError):
             parse("")
+
+
+class TestSearchWithWhere:
+    def test_no_where_clause(self):
+        node = parse("SEARCH docs SIMILAR TO 'ml' LIMIT 5")
+        assert node.query_filter is None
+
+    def test_equality_filter(self):
+        node = parse("SEARCH docs SIMILAR TO 'ml' LIMIT 5 WHERE category = 'paper'")
+        f = node.query_filter
+        assert isinstance(f, CompareExpr)
+        assert f.field == "category"
+        assert f.op == "="
+        assert f.value == "paper"
+
+    def test_not_equals_filter(self):
+        node = parse("SEARCH docs SIMILAR TO 'ml' LIMIT 5 WHERE status != 'draft'")
+        f = node.query_filter
+        assert isinstance(f, CompareExpr)
+        assert f.op == "!="
+        assert f.value == "draft"
+
+    def test_range_gt(self):
+        node = parse("SEARCH docs SIMILAR TO 'ml' LIMIT 5 WHERE score > 0.8")
+        f = node.query_filter
+        assert isinstance(f, CompareExpr)
+        assert f.op == ">"
+        assert f.value == pytest.approx(0.8)
+
+    def test_range_gte(self):
+        node = parse("SEARCH docs SIMILAR TO 'x' LIMIT 5 WHERE year >= 2020")
+        assert isinstance(node.query_filter, CompareExpr)
+        assert node.query_filter.op == ">="
+        assert node.query_filter.value == 2020
+
+    def test_range_lt(self):
+        node = parse("SEARCH docs SIMILAR TO 'x' LIMIT 5 WHERE year < 2024")
+        assert isinstance(node.query_filter, CompareExpr)
+        assert node.query_filter.op == "<"
+
+    def test_range_lte(self):
+        node = parse("SEARCH docs SIMILAR TO 'x' LIMIT 5 WHERE year <= 2023")
+        assert isinstance(node.query_filter, CompareExpr)
+        assert node.query_filter.op == "<="
+
+    def test_between(self):
+        node = parse("SEARCH docs SIMILAR TO 'x' LIMIT 5 WHERE year BETWEEN 2018 AND 2023")
+        f = node.query_filter
+        assert isinstance(f, BetweenExpr)
+        assert f.field == "year"
+        assert f.low == 2018
+        assert f.high == 2023
+
+    def test_in_expr(self):
+        node = parse("SEARCH docs SIMILAR TO 'x' LIMIT 5 WHERE status IN ('a', 'b')")
+        f = node.query_filter
+        assert isinstance(f, InExpr)
+        assert f.field == "status"
+        assert f.values == ("a", "b")
+
+    def test_in_with_trailing_comma(self):
+        node = parse("SEARCH docs SIMILAR TO 'x' LIMIT 5 WHERE status IN ('a', 'b',)")
+        assert isinstance(node.query_filter, InExpr)
+        assert len(node.query_filter.values) == 2
+
+    def test_not_in_expr(self):
+        node = parse("SEARCH docs SIMILAR TO 'x' LIMIT 5 WHERE status NOT IN ('deleted', 'archived')")
+        f = node.query_filter
+        assert isinstance(f, NotInExpr)
+        assert f.values == ("deleted", "archived")
+
+    def test_is_null(self):
+        node = parse("SEARCH docs SIMILAR TO 'x' LIMIT 5 WHERE reviewer IS NULL")
+        f = node.query_filter
+        assert isinstance(f, IsNullExpr)
+        assert f.field == "reviewer"
+
+    def test_is_not_null(self):
+        node = parse("SEARCH docs SIMILAR TO 'x' LIMIT 5 WHERE reviewer IS NOT NULL")
+        assert isinstance(node.query_filter, IsNotNullExpr)
+        assert node.query_filter.field == "reviewer"
+
+    def test_is_empty(self):
+        node = parse("SEARCH docs SIMILAR TO 'x' LIMIT 5 WHERE tags IS EMPTY")
+        assert isinstance(node.query_filter, IsEmptyExpr)
+        assert node.query_filter.field == "tags"
+
+    def test_is_not_empty(self):
+        node = parse("SEARCH docs SIMILAR TO 'x' LIMIT 5 WHERE tags IS NOT EMPTY")
+        assert isinstance(node.query_filter, IsNotEmptyExpr)
+
+    def test_match_text(self):
+        node = parse("SEARCH docs SIMILAR TO 'x' LIMIT 5 WHERE title MATCH 'deep learning'")
+        f = node.query_filter
+        assert isinstance(f, MatchTextExpr)
+        assert f.field == "title"
+        assert f.text == "deep learning"
+
+    def test_match_any(self):
+        node = parse("SEARCH docs SIMILAR TO 'x' LIMIT 5 WHERE title MATCH ANY 'nlp ai'")
+        f = node.query_filter
+        assert isinstance(f, MatchAnyExpr)
+        assert f.text == "nlp ai"
+
+    def test_match_phrase(self):
+        node = parse("SEARCH docs SIMILAR TO 'x' LIMIT 5 WHERE title MATCH PHRASE 'neural net'")
+        assert isinstance(node.query_filter, MatchPhraseExpr)
+
+    def test_and_expr_two_operands(self):
+        node = parse("SEARCH docs SIMILAR TO 'x' LIMIT 5 WHERE a = '1' AND b = '2'")
+        f = node.query_filter
+        assert isinstance(f, AndExpr)
+        assert len(f.operands) == 2
+        assert all(isinstance(op, CompareExpr) for op in f.operands)
+
+    def test_and_expr_three_operands_flattened(self):
+        node = parse(
+            "SEARCH d SIMILAR TO 'x' LIMIT 5 WHERE a = '1' AND b = '2' AND c = '3'"
+        )
+        f = node.query_filter
+        assert isinstance(f, AndExpr)
+        assert len(f.operands) == 3  # flattened, not binary-nested
+
+    def test_or_expr(self):
+        node = parse("SEARCH docs SIMILAR TO 'x' LIMIT 5 WHERE a = '1' OR b = '2'")
+        f = node.query_filter
+        assert isinstance(f, OrExpr)
+        assert len(f.operands) == 2
+
+    def test_not_expr(self):
+        node = parse("SEARCH docs SIMILAR TO 'x' LIMIT 5 WHERE NOT status = 'draft'")
+        f = node.query_filter
+        assert isinstance(f, NotExpr)
+        assert isinstance(f.operand, CompareExpr)
+
+    def test_parenthesized_or_inside_and(self):
+        node = parse(
+            "SEARCH docs SIMILAR TO 'x' LIMIT 5 "
+            "WHERE (src = 'a' OR src = 'b') AND year > 2020"
+        )
+        f = node.query_filter
+        assert isinstance(f, AndExpr)
+        assert isinstance(f.operands[0], OrExpr)
+        assert isinstance(f.operands[1], CompareExpr)
+
+    def test_dotted_field_path(self):
+        node = parse("SEARCH docs SIMILAR TO 'x' LIMIT 5 WHERE meta.source = 'web'")
+        assert isinstance(node.query_filter, CompareExpr)
+        assert node.query_filter.field == "meta.source"
+
+    def test_using_model_then_where(self):
+        node = parse(
+            "SEARCH docs SIMILAR TO 'x' LIMIT 5 "
+            "USING MODEL 'my-model' WHERE category = 'paper'"
+        )
+        assert node.model == "my-model"
+        assert isinstance(node.query_filter, CompareExpr)
+
+    def test_between_and_does_not_confuse_logical_and(self):
+        # The AND inside BETWEEN must not be consumed by the logical AND loop
+        node = parse(
+            "SEARCH d SIMILAR TO 'x' LIMIT 5 WHERE year BETWEEN 2018 AND 2023 AND category = 'ai'"
+        )
+        f = node.query_filter
+        assert isinstance(f, AndExpr)
+        assert isinstance(f.operands[0], BetweenExpr)
+        assert isinstance(f.operands[1], CompareExpr)
+        assert len(f.operands) == 2
+
+    def test_not_negates_parenthesized_group(self):
+        node = parse(
+            "SEARCH d SIMILAR TO 'x' LIMIT 5 WHERE NOT (a = '1' OR b = '2')"
+        )
+        f = node.query_filter
+        assert isinstance(f, NotExpr)
+        assert isinstance(f.operand, OrExpr)
+
+    def test_missing_rparen_raises(self):
+        with pytest.raises(QQLSyntaxError):
+            parse("SEARCH docs SIMILAR TO 'x' LIMIT 5 WHERE (a = '1'")
