@@ -105,6 +105,82 @@ class TestErrors:
         assert exc_info.value.pos is not None
 
 
+class TestNewOperators:
+    def test_not_equals(self):
+        tokens = tokenize("field != 'x'")
+        assert tokens[1].kind == TokenKind.NOT_EQUALS
+        assert tokens[1].value == "!="
+
+    def test_gt(self):
+        tokens = tokenize("score > 0.5")
+        assert tokens[1].kind == TokenKind.GT
+        assert tokens[1].value == ">"
+
+    def test_gte(self):
+        tokens = tokenize("score >= 0.5")
+        assert tokens[1].kind == TokenKind.GTE
+        assert tokens[1].value == ">="
+
+    def test_lt(self):
+        tokens = tokenize("year < 2024")
+        assert tokens[1].kind == TokenKind.LT
+        assert tokens[1].value == "<"
+
+    def test_lte(self):
+        tokens = tokenize("year <= 2023")
+        assert tokens[1].kind == TokenKind.LTE
+        assert tokens[1].value == "<="
+
+    def test_lparen_rparen(self):
+        ks = kinds("(a OR b)")
+        assert TokenKind.LPAREN in ks
+        assert TokenKind.RPAREN in ks
+
+    def test_filter_keywords(self):
+        ks = kinds("AND OR NOT IN BETWEEN IS NULL EMPTY MATCH ANY PHRASE")
+        assert TokenKind.AND     in ks
+        assert TokenKind.OR      in ks
+        assert TokenKind.NOT     in ks
+        assert TokenKind.IN      in ks
+        assert TokenKind.BETWEEN in ks
+        assert TokenKind.IS      in ks
+        assert TokenKind.NULL    in ks
+        assert TokenKind.EMPTY   in ks
+        assert TokenKind.MATCH   in ks
+        assert TokenKind.ANY     in ks
+        assert TokenKind.PHRASE  in ks
+
+    def test_filter_keywords_case_insensitive(self):
+        ks = kinds("and or not in between is null empty match any phrase")
+        assert TokenKind.AND in ks
+        assert TokenKind.OR  in ks
+        assert TokenKind.NOT in ks
+
+    def test_dotted_identifier(self):
+        tokens = tokenize("meta.source")
+        assert tokens[0].kind == TokenKind.IDENTIFIER
+        assert tokens[0].value == "meta.source"
+
+    def test_three_level_dotted_identifier(self):
+        tokens = tokenize("a.b.c")
+        assert tokens[0].kind == TokenKind.IDENTIFIER
+        assert tokens[0].value == "a.b.c"
+
+    def test_nested_array_path(self):
+        tokens = tokenize("country.cities[].population")
+        assert tokens[0].kind == TokenKind.IDENTIFIER
+        assert tokens[0].value == "country.cities[].population"
+
+    def test_gt_does_not_consume_equals_sign(self):
+        # ">" followed by non-"=" should be GT only
+        tokens = tokenize("a > b")
+        assert tokens[1].kind == TokenKind.GT
+
+    def test_bare_exclamation_raises(self):
+        with pytest.raises(QQLSyntaxError):
+            tokenize("field ! 'x'")
+
+
 class TestEOF:
     def test_ends_with_eof(self):
         tokens = tokenize("hello")

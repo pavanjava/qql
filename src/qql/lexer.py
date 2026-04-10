@@ -5,7 +5,7 @@ from .exceptions import QQLSyntaxError
 
 
 class TokenKind(Enum):
-    # Keywords
+    # ── Statement keywords ────────────────────────────────────────────────
     INSERT = auto()
     INTO = auto()
     COLLECTION = auto()
@@ -24,24 +24,45 @@ class TokenKind(Enum):
     FROM = auto()
     WHERE = auto()
     ID = auto()
-    # Literals & names
+    # ── Filter keywords ───────────────────────────────────────────────────
+    AND = auto()
+    OR = auto()
+    NOT = auto()
+    IN = auto()
+    BETWEEN = auto()
+    IS = auto()
+    NULL = auto()
+    EMPTY = auto()
+    MATCH = auto()
+    ANY = auto()
+    PHRASE = auto()
+    # ── Literals & names ─────────────────────────────────────────────────
     IDENTIFIER = auto()
     STRING = auto()
     INTEGER = auto()
     FLOAT = auto()
-    # Punctuation
+    # ── Punctuation ───────────────────────────────────────────────────────
     LBRACE = auto()
     RBRACE = auto()
     LBRACKET = auto()
     RBRACKET = auto()
+    LPAREN = auto()
+    RPAREN = auto()
     COLON = auto()
     COMMA = auto()
     EQUALS = auto()
-    # Control
+    # ── Comparison operators ──────────────────────────────────────────────
+    NOT_EQUALS = auto()   # !=
+    GT = auto()           # >
+    GTE = auto()          # >=
+    LT = auto()           # <
+    LTE = auto()          # <=
+    # ── Control ───────────────────────────────────────────────────────────
     EOF = auto()
 
 
 _KEYWORDS: dict[str, TokenKind] = {
+    # Statement keywords
     "INSERT": TokenKind.INSERT,
     "INTO": TokenKind.INTO,
     "COLLECTION": TokenKind.COLLECTION,
@@ -60,6 +81,18 @@ _KEYWORDS: dict[str, TokenKind] = {
     "FROM": TokenKind.FROM,
     "WHERE": TokenKind.WHERE,
     "ID": TokenKind.ID,
+    # Filter keywords
+    "AND": TokenKind.AND,
+    "OR": TokenKind.OR,
+    "NOT": TokenKind.NOT,
+    "IN": TokenKind.IN,
+    "BETWEEN": TokenKind.BETWEEN,
+    "IS": TokenKind.IS,
+    "NULL": TokenKind.NULL,
+    "EMPTY": TokenKind.EMPTY,
+    "MATCH": TokenKind.MATCH,
+    "ANY": TokenKind.ANY,
+    "PHRASE": TokenKind.PHRASE,
 }
 
 
@@ -83,7 +116,7 @@ class Lexer:
 
             ch = query[i]
 
-            # Single-character punctuation
+            # ── Braces / brackets / punctuation ──────────────────────────
             if ch == "{":
                 tokens.append(Token(TokenKind.LBRACE, "{", i))
                 i += 1
@@ -96,17 +129,45 @@ class Lexer:
             elif ch == "]":
                 tokens.append(Token(TokenKind.RBRACKET, "]", i))
                 i += 1
+            elif ch == "(":
+                tokens.append(Token(TokenKind.LPAREN, "(", i))
+                i += 1
+            elif ch == ")":
+                tokens.append(Token(TokenKind.RPAREN, ")", i))
+                i += 1
             elif ch == ":":
                 tokens.append(Token(TokenKind.COLON, ":", i))
                 i += 1
             elif ch == ",":
                 tokens.append(Token(TokenKind.COMMA, ",", i))
                 i += 1
+
+            # ── Comparison operators (multi-char look-ahead) ──────────────
             elif ch == "=":
                 tokens.append(Token(TokenKind.EQUALS, "=", i))
                 i += 1
+            elif ch == "!":
+                if i + 1 < n and query[i + 1] == "=":
+                    tokens.append(Token(TokenKind.NOT_EQUALS, "!=", i))
+                    i += 2
+                else:
+                    raise QQLSyntaxError(f"Unexpected character '!'", i)
+            elif ch == ">":
+                if i + 1 < n and query[i + 1] == "=":
+                    tokens.append(Token(TokenKind.GTE, ">=", i))
+                    i += 2
+                else:
+                    tokens.append(Token(TokenKind.GT, ">", i))
+                    i += 1
+            elif ch == "<":
+                if i + 1 < n and query[i + 1] == "=":
+                    tokens.append(Token(TokenKind.LTE, "<=", i))
+                    i += 2
+                else:
+                    tokens.append(Token(TokenKind.LT, "<", i))
+                    i += 1
 
-            # String literals
+            # ── String literals ───────────────────────────────────────────
             elif ch in ('"', "'"):
                 start = i
                 quote = ch
@@ -114,7 +175,6 @@ class Lexer:
                 buf: list[str] = []
                 while i < n:
                     if query[i] == "\\" and i + 1 < n:
-                        # Handle escape sequences
                         next_ch = query[i + 1]
                         if next_ch == "n":
                             buf.append("\n")
@@ -136,7 +196,7 @@ class Lexer:
                     raise QQLSyntaxError("Unterminated string literal", start)
                 tokens.append(Token(TokenKind.STRING, "".join(buf), start))
 
-            # Numbers: optional leading minus
+            # ── Numbers: optional leading minus ───────────────────────────
             elif ch.isdigit() or (ch == "-" and i + 1 < n and query[i + 1].isdigit()):
                 start = i
                 if ch == "-":
@@ -151,14 +211,40 @@ class Lexer:
                 else:
                     tokens.append(Token(TokenKind.INTEGER, query[start:i], start))
 
-            # Identifiers and keywords
+            # ── Identifiers, keywords, and dot-notation field paths ────────
             elif ch.isalpha() or ch == "_":
                 start = i
+                # Collect the base word
                 while i < n and (query[i].isalnum() or query[i] == "_"):
                     i += 1
+                # Extend for dotted field paths: consume ".word" and "[].word" segments
+                # so that meta.source and country.cities[].population become single tokens.
+                while i < n:
+                    if query[i] == "." and i + 1 < n and (query[i + 1].isalpha() or query[i + 1] == "_"):
+                        # ".identifier" segment
+                        i += 1  # consume "."
+                        while i < n and (query[i].isalnum() or query[i] == "_"):
+                            i += 1
+                    elif (
+                        i + 2 < n
+                        and query[i : i + 3] == "[]."
+                        and i + 3 < n
+                        and (query[i + 3].isalpha() or query[i + 3] == "_")
+                    ):
+                        # "[]." array marker segment
+                        i += 3  # consume "[]."
+                        while i < n and (query[i].isalnum() or query[i] == "_"):
+                            i += 1
+                    else:
+                        break
                 word = query[start:i]
-                upper = word.upper()
-                kind = _KEYWORDS.get(upper, TokenKind.IDENTIFIER)
+                # Keyword lookup uses the uppercased first segment only for dotted paths
+                # so that field names like "meta.from" are always IDENTIFIER, not keywords.
+                first_segment = word.split(".")[0].upper()
+                if "." not in word and first_segment in _KEYWORDS:
+                    kind = _KEYWORDS[first_segment]
+                else:
+                    kind = TokenKind.IDENTIFIER
                 tokens.append(Token(kind, word, start))
 
             else:

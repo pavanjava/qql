@@ -1,12 +1,122 @@
-from dataclasses import dataclass
-from typing import Any
+from __future__ import annotations
 
+from dataclasses import dataclass
+from typing import Any, Union
+
+
+# ── Filter expression leaf nodes ──────────────────────────────────────────────
+
+@dataclass(frozen=True)
+class CompareExpr:
+    """field op literal  — covers =, !=, >, >=, <, <="""
+    field: str
+    op: str   # one of: "=", "!=", ">", ">=", "<", "<="
+    value: str | int | float
+
+
+@dataclass(frozen=True)
+class BetweenExpr:
+    """field BETWEEN low AND high"""
+    field: str
+    low: int | float
+    high: int | float
+
+
+@dataclass(frozen=True)
+class InExpr:
+    """field IN (v1, v2, ...)"""
+    field: str
+    values: tuple[str | int | float, ...]
+
+
+@dataclass(frozen=True)
+class NotInExpr:
+    """field NOT IN (v1, v2, ...)"""
+    field: str
+    values: tuple[str | int | float, ...]
+
+
+@dataclass(frozen=True)
+class IsNullExpr:
+    """field IS NULL"""
+    field: str
+
+
+@dataclass(frozen=True)
+class IsNotNullExpr:
+    """field IS NOT NULL"""
+    field: str
+
+
+@dataclass(frozen=True)
+class IsEmptyExpr:
+    """field IS EMPTY"""
+    field: str
+
+
+@dataclass(frozen=True)
+class IsNotEmptyExpr:
+    """field IS NOT EMPTY"""
+    field: str
+
+
+@dataclass(frozen=True)
+class MatchTextExpr:
+    """field MATCH 'text'  — all terms required (MatchText)"""
+    field: str
+    text: str
+
+
+@dataclass(frozen=True)
+class MatchAnyExpr:
+    """field MATCH ANY 'text'  — any term matches (MatchTextAny)"""
+    field: str
+    text: str
+
+
+@dataclass(frozen=True)
+class MatchPhraseExpr:
+    """field MATCH PHRASE 'text'  — exact phrase (MatchPhrase)"""
+    field: str
+    text: str
+
+
+# ── Filter expression logical nodes ──────────────────────────────────────────
+
+@dataclass(frozen=True)
+class AndExpr:
+    """A AND B AND C — flattened into a single node with N operands."""
+    operands: tuple[FilterExpr, ...]
+
+
+@dataclass(frozen=True)
+class OrExpr:
+    """A OR B OR C"""
+    operands: tuple[FilterExpr, ...]
+
+
+@dataclass(frozen=True)
+class NotExpr:
+    """NOT A"""
+    operand: FilterExpr
+
+
+# Union type covering all filter expression nodes
+FilterExpr = Union[
+    CompareExpr, BetweenExpr, InExpr, NotInExpr,
+    IsNullExpr, IsNotNullExpr, IsEmptyExpr, IsNotEmptyExpr,
+    MatchTextExpr, MatchAnyExpr, MatchPhraseExpr,
+    AndExpr, OrExpr, NotExpr,
+]
+
+
+# ── Statement nodes ───────────────────────────────────────────────────────────
 
 @dataclass(frozen=True)
 class InsertStmt:
     collection: str
     values: dict[str, Any]  # must contain "text" key
-    model: str | None  # None → use default
+    model: str | None       # None → use default
 
 
 @dataclass(frozen=True)
@@ -30,6 +140,7 @@ class SearchStmt:
     query_text: str
     limit: int
     model: str | None
+    query_filter: FilterExpr | None = None  # optional WHERE clause; default keeps existing tests valid
 
 
 @dataclass(frozen=True)
@@ -38,7 +149,7 @@ class DeleteStmt:
     point_id: str | int
 
 
-# Union type for all statement nodes
+# Union type for all top-level statement nodes
 ASTNode = (
     InsertStmt
     | CreateCollectionStmt
