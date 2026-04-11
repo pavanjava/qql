@@ -185,3 +185,47 @@ class TestEOF:
     def test_ends_with_eof(self):
         tokens = tokenize("hello")
         assert tokens[-1].kind == TokenKind.EOF
+
+
+class TestHybridKeyword:
+    def test_hybrid_keyword_uppercase(self):
+        ks = kinds("HYBRID")
+        assert ks[0] == TokenKind.HYBRID
+
+    def test_hybrid_keyword_lowercase(self):
+        ks = kinds("hybrid")
+        assert ks[0] == TokenKind.HYBRID
+
+    def test_dense_keyword(self):
+        ks = kinds("DENSE")
+        assert ks[0] == TokenKind.DENSE
+
+    def test_dense_keyword_lowercase(self):
+        ks = kinds("dense")
+        assert ks[0] == TokenKind.DENSE
+
+    def test_sparse_keyword(self):
+        ks = kinds("SPARSE")
+        assert ks[0] == TokenKind.SPARSE
+
+    def test_sparse_keyword_lowercase(self):
+        ks = kinds("sparse")
+        assert ks[0] == TokenKind.SPARSE
+
+    def test_hybrid_in_create_statement(self):
+        ks = kinds("CREATE COLLECTION articles HYBRID")
+        assert ks[3] == TokenKind.HYBRID
+
+    def test_hybrid_in_search_statement(self):
+        ks = kinds("SEARCH col SIMILAR TO 'q' LIMIT 5 USING HYBRID")
+        assert TokenKind.HYBRID in ks
+
+    def test_dense_as_identifier_in_dotted_path(self):
+        tokens = tokenize("dense.field")
+        assert tokens[0].kind == TokenKind.IDENTIFIER
+        assert tokens[0].value == "dense.field"
+
+    def test_sparse_as_identifier_in_dotted_path(self):
+        tokens = tokenize("sparse.value")
+        assert tokens[0].kind == TokenKind.IDENTIFIER
+        assert tokens[0].value == "sparse.value"

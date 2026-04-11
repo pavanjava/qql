@@ -326,3 +326,154 @@ class TestSearchWithWhere:
     def test_missing_rparen_raises(self):
         with pytest.raises(QQLSyntaxError):
             parse("SEARCH docs SIMILAR TO 'x' LIMIT 5 WHERE (a = '1'")
+
+
+# ── Hybrid vector tests ───────────────────────────────────────────────────────
+
+class TestHybridCreate:
+    def test_create_hybrid_sets_flag(self):
+        node = parse("CREATE COLLECTION articles HYBRID")
+        assert isinstance(node, CreateCollectionStmt)
+        assert node.collection == "articles"
+        assert node.hybrid is True
+
+    def test_create_non_hybrid_default_false(self):
+        node = parse("CREATE COLLECTION articles")
+        assert node.hybrid is False
+
+    def test_create_hybrid_case_insensitive(self):
+        node = parse("create collection col hybrid")
+        assert node.hybrid is True
+
+
+class TestHybridInsert:
+    def test_insert_using_hybrid_sets_flag(self):
+        node = parse("INSERT INTO COLLECTION col VALUES {'text': 'hi'} USING HYBRID")
+        assert isinstance(node, InsertStmt)
+        assert node.hybrid is True
+        assert node.model is None
+        assert node.sparse_model is None
+
+    def test_insert_non_hybrid_default(self):
+        node = parse("INSERT INTO COLLECTION col VALUES {'text': 'hi'}")
+        assert node.hybrid is False
+        assert node.sparse_model is None
+
+    def test_insert_using_model_still_works(self):
+        node = parse("INSERT INTO COLLECTION col VALUES {'text': 'hi'} USING MODEL 'my-model'")
+        assert node.hybrid is False
+        assert node.model == "my-model"
+        assert node.sparse_model is None
+
+    def test_insert_hybrid_dense_model(self):
+        node = parse(
+            "INSERT INTO COLLECTION col VALUES {'text': 'hi'} "
+            "USING HYBRID DENSE MODEL 'BAAI/bge-small-en-v1.5'"
+        )
+        assert node.hybrid is True
+        assert node.model == "BAAI/bge-small-en-v1.5"
+        assert node.sparse_model is None
+
+    def test_insert_hybrid_sparse_model(self):
+        node = parse(
+            "INSERT INTO COLLECTION col VALUES {'text': 'hi'} "
+            "USING HYBRID SPARSE MODEL 'Qdrant/bm25'"
+        )
+        assert node.hybrid is True
+        assert node.model is None
+        assert node.sparse_model == "Qdrant/bm25"
+
+    def test_insert_hybrid_both_models(self):
+        node = parse(
+            "INSERT INTO COLLECTION col VALUES {'text': 'hi'} "
+            "USING HYBRID DENSE MODEL 'BAAI/bge-base-en-v1.5' SPARSE MODEL 'Qdrant/bm25'"
+        )
+        assert node.hybrid is True
+        assert node.model == "BAAI/bge-base-en-v1.5"
+        assert node.sparse_model == "Qdrant/bm25"
+
+    def test_insert_hybrid_both_models_reversed_order(self):
+        node = parse(
+            "INSERT INTO COLLECTION col VALUES {'text': 'hi'} "
+            "USING HYBRID SPARSE MODEL 'Qdrant/bm25' DENSE MODEL 'BAAI/bge-base-en-v1.5'"
+        )
+        assert node.hybrid is True
+        assert node.model == "BAAI/bge-base-en-v1.5"
+        assert node.sparse_model == "Qdrant/bm25"
+
+
+class TestHybridSearch:
+    def test_search_using_hybrid_sets_flag(self):
+        node = parse("SEARCH articles SIMILAR TO 'ml' LIMIT 10 USING HYBRID")
+        assert isinstance(node, SearchStmt)
+        assert node.hybrid is True
+        assert node.model is None
+        assert node.sparse_model is None
+
+    def test_search_non_hybrid_default(self):
+        node = parse("SEARCH articles SIMILAR TO 'ml' LIMIT 10")
+        assert node.hybrid is False
+        assert node.sparse_model is None
+
+    def test_search_using_model_still_works(self):
+        node = parse("SEARCH articles SIMILAR TO 'ml' LIMIT 5 USING MODEL 'my-model'")
+        assert node.hybrid is False
+        assert node.model == "my-model"
+        assert node.sparse_model is None
+
+    def test_search_hybrid_dense_model(self):
+        node = parse(
+            "SEARCH articles SIMILAR TO 'ml' LIMIT 10 "
+            "USING HYBRID DENSE MODEL 'BAAI/bge-small-en-v1.5'"
+        )
+        assert node.hybrid is True
+        assert node.model == "BAAI/bge-small-en-v1.5"
+        assert node.sparse_model is None
+
+    def test_search_hybrid_sparse_model(self):
+        node = parse(
+            "SEARCH articles SIMILAR TO 'ml' LIMIT 10 "
+            "USING HYBRID SPARSE MODEL 'prithivida/Splade_PP_en_v1'"
+        )
+        assert node.hybrid is True
+        assert node.model is None
+        assert node.sparse_model == "prithivida/Splade_PP_en_v1"
+
+    def test_search_hybrid_both_models(self):
+        node = parse(
+            "SEARCH articles SIMILAR TO 'ml' LIMIT 10 "
+            "USING HYBRID DENSE MODEL 'BAAI/bge-base-en-v1.5' SPARSE MODEL 'Qdrant/bm25'"
+        )
+        assert node.hybrid is True
+        assert node.model == "BAAI/bge-base-en-v1.5"
+        assert node.sparse_model == "Qdrant/bm25"
+
+    def test_search_hybrid_both_models_reversed_order(self):
+        node = parse(
+            "SEARCH articles SIMILAR TO 'ml' LIMIT 10 "
+            "USING HYBRID SPARSE MODEL 'Qdrant/bm25' DENSE MODEL 'BAAI/bge-base-en-v1.5'"
+        )
+        assert node.hybrid is True
+        assert node.model == "BAAI/bge-base-en-v1.5"
+        assert node.sparse_model == "Qdrant/bm25"
+
+    def test_search_hybrid_with_where(self):
+        node = parse(
+            "SEARCH articles SIMILAR TO 'ml' LIMIT 10 USING HYBRID WHERE year > 2020"
+        )
+        assert node.hybrid is True
+        assert isinstance(node.query_filter, CompareExpr)
+        assert node.query_filter.field == "year"
+
+    def test_search_hybrid_dense_model_and_where(self):
+        node = parse(
+            "SEARCH articles SIMILAR TO 'ml' LIMIT 10 "
+            "USING HYBRID DENSE MODEL 'BAAI/bge-small-en-v1.5' WHERE year > 2020"
+        )
+        assert node.hybrid is True
+        assert node.model == "BAAI/bge-small-en-v1.5"
+        assert isinstance(node.query_filter, CompareExpr)
+
+    def test_search_hybrid_limit_preserved(self):
+        node = parse("SEARCH col SIMILAR TO 'q' LIMIT 7 USING HYBRID")
+        assert node.limit == 7

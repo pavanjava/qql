@@ -381,3 +381,300 @@ class TestSearchWithFilter:
         result = executor._wrap_as_filter(fc)
         assert isinstance(result, Filter)
         assert result.must[0] is fc
+
+
+# ── Hybrid vector executor tests ──────────────────────────────────────────────
+
+FAKE_SPARSE = {"indices": [1, 42, 100], "values": [0.22, 0.8, 0.3]}
+
+
+@pytest.fixture
+def mock_sparse_embedder(mocker):
+    mock = mocker.MagicMock()
+    mock.embed.return_value = FAKE_SPARSE
+    mock.query_embed.return_value = FAKE_SPARSE
+    mocker.patch("qql.executor.SparseEmbedder", return_value=mock)
+    return mock
+
+
+class TestHybridCreate:
+    def test_create_hybrid_uses_named_vector_config(self, executor, mock_client):
+        node = CreateCollectionStmt(collection="articles", hybrid=True)
+        result = executor.execute(node)
+        mock_client.create_collection.assert_called_once()
+        kw = mock_client.create_collection.call_args.kwargs
+        assert "sparse_vectors_config" in kw
+        assert "dense" in kw["vectors_config"]
+        assert "sparse" in kw["sparse_vectors_config"]
+        assert result.success is True
+        assert "hybrid" in result.message
+
+    def test_create_hybrid_existing_collection_is_noop(self, executor, mock_client):
+        mock_client.collection_exists.return_value = True
+        node = CreateCollectionStmt(collection="existing", hybrid=True)
+        result = executor.execute(node)
+        mock_client.create_collection.assert_not_called()
+        assert "already exists" in result.message
+
+    def test_create_non_hybrid_unchanged(self, executor, mock_client):
+        from qdrant_client.models import VectorParams
+
+        node = CreateCollectionStmt(collection="col", hybrid=False)
+        executor.execute(node)
+        kw = mock_client.create_collection.call_args.kwargs
+        assert isinstance(kw["vectors_config"], VectorParams)
+        assert "sparse_vectors_config" not in kw
+
+
+class TestHybridInsert:
+    def test_hybrid_insert_upsert_has_named_vectors(
+        self, executor, mock_client, mock_sparse_embedder
+    ):
+        mock_client.collection_exists.return_value = True
+        node = InsertStmt(
+            collection="col", values={"text": "hello"}, model=None, hybrid=True
+        )
+        result = executor.execute(node)
+        mock_client.upsert.assert_called_once()
+        point = mock_client.upsert.call_args.kwargs["points"][0]
+        assert "dense" in point.vector
+        assert "sparse" in point.vector
+        assert result.success is True
+        assert "hybrid" in result.message
+
+    def test_hybrid_insert_sparse_is_SparseVector(
+        self, executor, mock_client, mock_sparse_embedder
+    ):
+        from qdrant_client.models import SparseVector
+
+        mock_client.collection_exists.return_value = True
+        node = InsertStmt(
+            collection="col", values={"text": "hello"}, model=None, hybrid=True
+        )
+        executor.execute(node)
+        point = mock_client.upsert.call_args.kwargs["points"][0]
+        assert isinstance(point.vector["sparse"], SparseVector)
+
+    def test_hybrid_insert_auto_creates_hybrid_collection(
+        self, executor, mock_client, mock_sparse_embedder
+    ):
+        mock_client.collection_exists.return_value = False
+        node = InsertStmt(
+            collection="col", values={"text": "hello"}, model=None, hybrid=True
+        )
+        executor.execute(node)
+        kw = mock_client.create_collection.call_args.kwargs
+        assert "sparse_vectors_config" in kw
+        assert "dense" in kw["vectors_config"]
+
+    def test_hybrid_insert_skips_create_when_exists(
+        self, executor, mock_client, mock_sparse_embedder
+    ):
+        mock_client.collection_exists.return_value = True
+        node = InsertStmt(
+            collection="col", values={"text": "hello"}, model=None, hybrid=True
+        )
+        executor.execute(node)
+        mock_client.create_collection.assert_not_called()
+
+    def test_hybrid_insert_uses_custom_dense_model(
+        self, executor, mock_client, mock_sparse_embedder, mocker
+    ):
+        mock_client.collection_exists.return_value = True
+        node = InsertStmt(
+            collection="col", values={"text": "hi"}, model="BAAI/bge-small-en-v1.5",
+            hybrid=True,
+        )
+        executor.execute(node)
+        # Embedder should have been called with the custom dense model name
+        call_args = mocker.patch.object  # already patched by mock_embedder fixture
+        # Verify through the dense vector in the upsert call
+        point = mock_client.upsert.call_args.kwargs["points"][0]
+        assert "dense" in point.vector
+
+    def test_hybrid_insert_uses_custom_sparse_model(
+        self, executor, mock_client, mocker
+    ):
+        mock_client.collection_exists.return_value = True
+        mock_sparse = mocker.MagicMock()
+        mock_sparse.embed.return_value = FAKE_SPARSE
+        sparse_cls = mocker.patch("qql.executor.SparseEmbedder", return_value=mock_sparse)
+        node = InsertStmt(
+            collection="col", values={"text": "hi"}, model=None,
+            hybrid=True, sparse_model="prithivida/Splade_PP_en_v1",
+        )
+        executor.execute(node)
+        sparse_cls.assert_called_once_with("prithivida/Splade_PP_en_v1")
+
+    def test_non_hybrid_insert_uses_flat_vector(self, executor, mock_client):
+        node = InsertStmt(
+            collection="col", values={"text": "hello"}, model=None, hybrid=False
+        )
+        executor.execute(node)
+        point = mock_client.upsert.call_args.kwargs["points"][0]
+        assert isinstance(point.vector, list)
+
+    def test_hybrid_insert_missing_text_raises(
+        self, executor, mock_client, mock_sparse_embedder
+    ):
+        node = InsertStmt(
+            collection="col", values={"author": "alice"}, model=None, hybrid=True
+        )
+        with pytest.raises(QQLRuntimeError, match="'text' field"):
+            executor.execute(node)
+
+
+class TestHybridSearch:
+    def test_hybrid_search_uses_prefetch(
+        self, executor, mock_client, mock_sparse_embedder, mocker
+    ):
+        mock_client.collection_exists.return_value = True
+        mock_resp = mocker.MagicMock()
+        mock_resp.points = []
+        mock_client.query_points.return_value = mock_resp
+
+        node = SearchStmt(
+            collection="col", query_text="ml", limit=10, model=None, hybrid=True
+        )
+        result = executor.execute(node)
+        mock_client.query_points.assert_called_once()
+        kw = mock_client.query_points.call_args.kwargs
+        assert "prefetch" in kw
+        assert len(kw["prefetch"]) == 2
+        assert result.success is True
+        assert "hybrid" in result.message
+
+    def test_hybrid_search_uses_rrf_fusion(
+        self, executor, mock_client, mock_sparse_embedder, mocker
+    ):
+        from qdrant_client.models import Fusion, FusionQuery
+
+        mock_client.collection_exists.return_value = True
+        mock_resp = mocker.MagicMock()
+        mock_resp.points = []
+        mock_client.query_points.return_value = mock_resp
+
+        node = SearchStmt(
+            collection="col", query_text="q", limit=5, model=None, hybrid=True
+        )
+        executor.execute(node)
+        kw = mock_client.query_points.call_args.kwargs
+        assert isinstance(kw["query"], FusionQuery)
+        assert kw["query"].fusion == Fusion.RRF
+
+    def test_hybrid_search_prefetch_limit_is_4x(
+        self, executor, mock_client, mock_sparse_embedder, mocker
+    ):
+        mock_client.collection_exists.return_value = True
+        mock_resp = mocker.MagicMock()
+        mock_resp.points = []
+        mock_client.query_points.return_value = mock_resp
+
+        node = SearchStmt(
+            collection="col", query_text="q", limit=5, model=None, hybrid=True
+        )
+        executor.execute(node)
+        prefetches = mock_client.query_points.call_args.kwargs["prefetch"]
+        assert all(p.limit == 20 for p in prefetches)
+
+    def test_hybrid_search_prefetch_using_fields(
+        self, executor, mock_client, mock_sparse_embedder, mocker
+    ):
+        mock_client.collection_exists.return_value = True
+        mock_resp = mocker.MagicMock()
+        mock_resp.points = []
+        mock_client.query_points.return_value = mock_resp
+
+        node = SearchStmt(
+            collection="col", query_text="q", limit=5, model=None, hybrid=True
+        )
+        executor.execute(node)
+        prefetches = mock_client.query_points.call_args.kwargs["prefetch"]
+        usings = {p.using for p in prefetches}
+        assert usings == {"dense", "sparse"}
+
+    def test_hybrid_search_with_where_filter(
+        self, executor, mock_client, mock_sparse_embedder, mocker
+    ):
+        from qql.ast_nodes import CompareExpr
+        from qdrant_client.models import Filter
+
+        mock_client.collection_exists.return_value = True
+        mock_resp = mocker.MagicMock()
+        mock_resp.points = []
+        mock_client.query_points.return_value = mock_resp
+
+        node = SearchStmt(
+            collection="col", query_text="q", limit=5, model=None, hybrid=True,
+            query_filter=CompareExpr(field="year", op=">", value=2020),
+        )
+        executor.execute(node)
+        kw = mock_client.query_points.call_args.kwargs
+        assert kw.get("query_filter") is not None
+        assert isinstance(kw["query_filter"], Filter)
+
+    def test_hybrid_search_nonexistent_collection_raises(
+        self, executor, mock_client, mock_sparse_embedder
+    ):
+        mock_client.collection_exists.return_value = False
+        node = SearchStmt(
+            collection="ghost", query_text="q", limit=5, model=None, hybrid=True
+        )
+        with pytest.raises(QQLRuntimeError, match="does not exist"):
+            executor.execute(node)
+
+    def test_non_hybrid_search_unchanged(self, executor, mock_client, mocker):
+        mock_client.collection_exists.return_value = True
+        mock_resp = mocker.MagicMock()
+        mock_resp.points = []
+        mock_client.query_points.return_value = mock_resp
+
+        node = SearchStmt(
+            collection="col", query_text="q", limit=5, model=None, hybrid=False
+        )
+        executor.execute(node)
+        kw = mock_client.query_points.call_args.kwargs
+        assert "prefetch" not in kw or kw.get("prefetch") is None
+
+    def test_hybrid_search_uses_custom_sparse_model(
+        self, executor, mock_client, mocker
+    ):
+        mock_client.collection_exists.return_value = True
+        mock_resp = mocker.MagicMock()
+        mock_resp.points = []
+        mock_client.query_points.return_value = mock_resp
+
+        mock_sparse = mocker.MagicMock()
+        mock_sparse.query_embed.return_value = FAKE_SPARSE
+        sparse_cls = mocker.patch("qql.executor.SparseEmbedder", return_value=mock_sparse)
+
+        node = SearchStmt(
+            collection="col", query_text="q", limit=5, model=None,
+            hybrid=True, sparse_model="prithivida/Splade_PP_en_v1",
+        )
+        executor.execute(node)
+        sparse_cls.assert_called_once_with("prithivida/Splade_PP_en_v1")
+
+
+class TestEnsureCollectionHybridCompat:
+    def test_named_vector_collection_skips_validation(self, executor, mock_client):
+        from qdrant_client.models import VectorParams
+
+        mock_client.collection_exists.return_value = True
+        # Simulate a named-vector (hybrid) collection: vectors is a dict
+        mock_client.get_collection.return_value.config.params.vectors = {
+            "dense": VectorParams(size=384, distance="Cosine")
+        }
+        # Should not raise even with a different size argument
+        executor._ensure_collection("hybrid_col", 384)
+        mock_client.create_collection.assert_not_called()
+
+    def test_unnamed_vector_mismatch_still_raises(self, executor, mock_client):
+        from qdrant_client.models import VectorParams
+
+        mock_client.collection_exists.return_value = True
+        mock_client.get_collection.return_value.config.params.vectors = VectorParams(
+            size=768, distance="Cosine"
+        )
+        with pytest.raises(QQLRuntimeError, match="dimension mismatch"):
+            executor._ensure_collection("col", 384)

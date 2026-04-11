@@ -3,8 +3,10 @@ from __future__ import annotations
 import sys
 
 import click
+from prompt_toolkit import PromptSession
+from prompt_toolkit.formatted_text import HTML
+from prompt_toolkit.history import InMemoryHistory
 from rich.console import Console
-from rich.prompt import Prompt
 from rich.table import Table
 
 from .config import delete_config, load_config, save_config, QQLConfig
@@ -24,9 +26,10 @@ Available statements:
   [yellow]INSERT INTO COLLECTION[/yellow] <name> [yellow]VALUES[/yellow] {[yellow]'text'[/yellow]: '...', ...}
       Insert a point. 'text' is required and auto-vectorized.
       Optional: [yellow]USING MODEL[/yellow] '<model>'
+      Optional: [yellow]USING HYBRID[/yellow] [DENSE MODEL '<model>'] [SPARSE MODEL '<model>']
 
-  [yellow]CREATE COLLECTION[/yellow] <name>
-      Create a new collection (uses default model dimensions).
+  [yellow]CREATE COLLECTION[/yellow] <name> [[yellow]HYBRID[/yellow]]
+      Create a new collection. Add HYBRID for dense+sparse BM25 vectors.
 
   [yellow]DROP COLLECTION[/yellow] <name>
       Delete a collection and all its points.
@@ -37,9 +40,18 @@ Available statements:
   [yellow]SEARCH[/yellow] <name> [yellow]SIMILAR TO[/yellow] '<text>' [yellow]LIMIT[/yellow] <n>
       Semantic search by vector similarity.
       Optional: [yellow]USING MODEL[/yellow] '<model>'
+      Optional: [yellow]USING HYBRID[/yellow] [DENSE MODEL '<model>'] [SPARSE MODEL '<model>']
+      Optional: [yellow]WHERE[/yellow] <filter>   (e.g. WHERE year > 2020 AND status = 'ok')
 
   [yellow]DELETE FROM[/yellow] <name> [yellow]WHERE id =[/yellow] '<id>'
       Delete a point by its ID.
+
+Keyboard shortcuts:
+  ← → arrows   move cursor within the current line
+  ↑ ↓ arrows   scroll through command history
+  Ctrl-A / Ctrl-E   jump to beginning / end of line
+  Ctrl-C   cancel current input
+  Ctrl-D   exit shell
 
 Type [bold]exit[/bold] or [bold]quit[/bold] to leave the shell.
 """
@@ -115,10 +127,16 @@ def _launch_repl(cfg: QQLConfig) -> None:
     console.print(f"[bold cyan]QQL Interactive Shell[/bold cyan]  •  {cfg.url}")
     console.print("Type [bold]help[/bold] for available commands or [bold]exit[/bold] to quit.\n")
 
+    session: PromptSession[str] = PromptSession(history=InMemoryHistory())
+
     while True:
         try:
-            query = Prompt.ask("[bold green]qql>[/bold green]").strip()
-        except (EOFError, KeyboardInterrupt):
+            query = session.prompt(HTML("<ansigreen><b>qql&gt;</b></ansigreen> ")).strip()
+        except KeyboardInterrupt:
+            # Ctrl-C clears the current line; continue the loop
+            continue
+        except EOFError:
+            # Ctrl-D exits
             console.print("\nBye.")
             break
 

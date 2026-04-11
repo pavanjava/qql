@@ -31,3 +31,37 @@ class Embedder:
     def dimensions(self) -> int:
         """Return the vector dimensionality by embedding a dummy string."""
         return len(self.embed("probe"))
+
+
+class SparseEmbedder:
+    """Sparse BM25-style embedder using fastembed.SparseTextEmbedding.
+
+    Returns dicts with "indices" and "values" lists (not numpy arrays),
+    ready for direct construction of qdrant_client SparseVector objects.
+
+    Uses asymmetric embedding: embed() for document indexing, query_embed()
+    for query-time encoding (BM25 IDF weighting differs at query vs. index time).
+    """
+
+    DEFAULT_MODEL = "Qdrant/bm25"
+
+    # Class-level cache mirrors Embedder's pattern
+    _cache: dict[str, object] = {}
+
+    def __init__(self, model_name: str = DEFAULT_MODEL) -> None:
+        self._model_name = model_name
+        if model_name not in SparseEmbedder._cache:
+            from fastembed import SparseTextEmbedding
+
+            SparseEmbedder._cache[model_name] = SparseTextEmbedding(model_name)
+        self._model = SparseEmbedder._cache[model_name]
+
+    def embed(self, text: str) -> dict[str, list]:
+        """Embed a document string. Returns {"indices": [...], "values": [...]}."""
+        result = next(iter(self._model.embed([text])))  # type: ignore[attr-defined]
+        return {"indices": result.indices.tolist(), "values": result.values.tolist()}
+
+    def query_embed(self, text: str) -> dict[str, list]:
+        """Embed a query string (BM25 applies different IDF weighting at query time)."""
+        result = next(iter(self._model.query_embed(text)))  # type: ignore[attr-defined]
+        return {"indices": result.indices.tolist(), "values": result.values.tolist()}

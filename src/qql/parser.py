@@ -77,17 +77,39 @@ class Parser:
         self._expect(TokenKind.VALUES)
         values = self._parse_dict()
         model: str | None = None
+        hybrid: bool = False
+        sparse_model: str | None = None
         if self._peek().kind == TokenKind.USING:
             self._advance()  # consume USING
-            self._expect(TokenKind.MODEL)
-            model = self._expect(TokenKind.STRING).value
-        return InsertStmt(collection=collection, values=values, model=model)
+            if self._peek().kind == TokenKind.HYBRID:
+                self._advance()  # consume HYBRID
+                hybrid = True
+                # Optional DENSE MODEL and/or SPARSE MODEL sub-clauses, any order
+                while self._peek().kind in (TokenKind.DENSE, TokenKind.SPARSE):
+                    sub = self._advance()
+                    self._expect(TokenKind.MODEL)
+                    m = self._expect(TokenKind.STRING).value
+                    if sub.kind == TokenKind.DENSE:
+                        model = m
+                    else:
+                        sparse_model = m
+            else:
+                self._expect(TokenKind.MODEL)
+                model = self._expect(TokenKind.STRING).value
+        return InsertStmt(
+            collection=collection, values=values, model=model,
+            hybrid=hybrid, sparse_model=sparse_model,
+        )
 
     def _parse_create(self) -> CreateCollectionStmt:
         self._expect(TokenKind.CREATE)
         self._expect(TokenKind.COLLECTION)
         collection = self._parse_identifier()
-        return CreateCollectionStmt(collection=collection)
+        hybrid: bool = False
+        if self._peek().kind == TokenKind.HYBRID:
+            self._advance()
+            hybrid = True
+        return CreateCollectionStmt(collection=collection, hybrid=hybrid)
 
     def _parse_drop(self) -> DropCollectionStmt:
         self._expect(TokenKind.DROP)
@@ -109,10 +131,25 @@ class Parser:
         self._expect(TokenKind.LIMIT)
         limit = int(self._expect(TokenKind.INTEGER).value)
         model: str | None = None
+        hybrid: bool = False
+        sparse_model: str | None = None
         if self._peek().kind == TokenKind.USING:
-            self._advance()
-            self._expect(TokenKind.MODEL)
-            model = self._expect(TokenKind.STRING).value
+            self._advance()  # consume USING
+            if self._peek().kind == TokenKind.HYBRID:
+                self._advance()  # consume HYBRID
+                hybrid = True
+                # Optional DENSE MODEL and/or SPARSE MODEL sub-clauses, any order
+                while self._peek().kind in (TokenKind.DENSE, TokenKind.SPARSE):
+                    sub = self._advance()
+                    self._expect(TokenKind.MODEL)
+                    m = self._expect(TokenKind.STRING).value
+                    if sub.kind == TokenKind.DENSE:
+                        model = m
+                    else:
+                        sparse_model = m
+            else:
+                self._expect(TokenKind.MODEL)
+                model = self._expect(TokenKind.STRING).value
         query_filter: FilterExpr | None = None
         if self._peek().kind == TokenKind.WHERE:
             self._advance()  # consume WHERE
@@ -122,6 +159,8 @@ class Parser:
             query_text=query_text,
             limit=limit,
             model=model,
+            hybrid=hybrid,
+            sparse_model=sparse_model,
             query_filter=query_filter,
         )
 

@@ -116,12 +116,15 @@ FilterExpr = Union[
 class InsertStmt:
     collection: str
     values: dict[str, Any]  # must contain "text" key
-    model: str | None       # None → use default
+    model: str | None       # dense model; None → use config default
+    hybrid: bool = False            # if True, also embed + store sparse BM25 vector
+    sparse_model: str | None = None # sparse model; None → SparseEmbedder.DEFAULT_MODEL
 
 
 @dataclass(frozen=True)
 class CreateCollectionStmt:
     collection: str
+    hybrid: bool = False    # if True, create with dense + sparse named vectors
 
 
 @dataclass(frozen=True)
@@ -139,7 +142,9 @@ class SearchStmt:
     collection: str
     query_text: str
     limit: int
-    model: str | None
+    model: str | None               # dense model; None → use config default
+    hybrid: bool = False            # if True, use prefetch+RRF hybrid search
+    sparse_model: str | None = None # sparse model for hybrid; None → SparseEmbedder.DEFAULT_MODEL
     query_filter: FilterExpr | None = None  # optional WHERE clause; default keeps existing tests valid
 
 
