@@ -12,6 +12,9 @@ class TokenKind(Enum):
     VALUES = auto()
     USING = auto()
     MODEL = auto()
+    HYBRID = auto()
+    DENSE = auto()
+    SPARSE = auto()
     CREATE = auto()
     DROP = auto()
     SHOW = auto()
@@ -69,6 +72,9 @@ _KEYWORDS: dict[str, TokenKind] = {
     "VALUES": TokenKind.VALUES,
     "USING": TokenKind.USING,
     "MODEL": TokenKind.MODEL,
+    "HYBRID": TokenKind.HYBRID,
+    "DENSE": TokenKind.DENSE,
+    "SPARSE": TokenKind.SPARSE,
     "CREATE": TokenKind.CREATE,
     "DROP": TokenKind.DROP,
     "SHOW": TokenKind.SHOW,

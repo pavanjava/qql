@@ -1,6 +1,6 @@
 # QQL — Qdrant Query Language
 
-A SQL-like CLI for [Qdrant](https://qdrant.tech), a high-performance vector database. Instead of writing Python SDK calls, you write natural query statements to insert, search, manage, and delete vector data — including rich SQL-style `WHERE` filters.
+A SQL-like CLI for [Qdrant](https://qdrant.tech), a high-performance vector database. Instead of writing Python SDK calls, you write natural query statements to insert, search, manage, and delete vector data — including rich SQL-style `WHERE` filters and hybrid dense+sparse vector search.
 
 ```
 qql> INSERT INTO COLLECTION notes VALUES {'text': 'Qdrant is a vector database', 'author': 'alice', 'year': 2024}
@@ -11,6 +11,12 @@ qql> SEARCH notes SIMILAR TO 'vector storage engines' LIMIT 3 WHERE year >= 2023
  Score  │ ID                                   │ Payload
 ────────┼──────────────────────────────────────┼──────────────────────────────────────
  0.8931 │ 3f2e1a4b-8c91-4d0e-b123-abc123def456 │ {'text': 'Qdrant is a ...', 'author': 'alice', 'year': 2024}
+
+qql> SEARCH notes SIMILAR TO 'vector databases' LIMIT 5 USING HYBRID
+✓ Found 1 result(s) (hybrid)
+ Score  │ ID                                   │ Payload
+────────┼──────────────────────────────────────┼──────────────────────────────────────
+ 0.9102 │ 3f2e1a4b-8c91-4d0e-b123-abc123def456 │ {'text': 'Qdrant is a ...', 'author': 'alice', 'year': 2024}
 ```
 
 ---
@@ -25,6 +31,7 @@ qql> SEARCH notes SIMILAR TO 'vector storage engines' LIMIT 3 WHERE year >= 2023
   - [INSERT — add a point](#insert--add-a-point)
   - [SEARCH — find similar points](#search--find-similar-points)
   - [WHERE Clause Filters](#where-clause-filters)
+  - [Hybrid Search (USING HYBRID)](#hybrid-search-using-hybrid)
   - [SHOW COLLECTIONS — list collections](#show-collections--list-collections)
   - [CREATE COLLECTION — create a collection](#create-collection--create-a-collection)
   - [DROP COLLECTION — delete a collection](#drop-collection--delete-a-collection)
@@ -59,9 +66,7 @@ Your query string
   Qdrant instance
 ```
 
-When you run `INSERT`, the `text` field in your dictionary is automatically converted into a dense vector using [Fastembed](https://github.com/qdrant/fastembed). The vector and the rest of your fields (stored as payload) are then upserted into Qdrant together. You never have to manage vectors manually.
-
-`SEARCH` also embeds your query text and finds the nearest vectors by cosine similarity. An optional `WHERE` clause lets you pre-filter the candidate set using any payload field before similarity ranking — exactly like a SQL `WHERE` on top of a vector search.
+When you run `INSERT`, the `text` field is automatically converted into a dense vector using [Fastembed](https://github.com/qdrant/fastembed). In **hybrid mode** (`USING HYBRID`), a sparse BM25 vector is also generated alongside the dense vector, and searches use Qdrant's Reciprocal Rank Fusion (RRF) to merge the results of both retrieval methods.
 
 ---
 
@@ -173,6 +178,8 @@ If the collection does not exist yet, it is **created automatically** with the c
 ```
 INSERT INTO COLLECTION <collection_name> VALUES {<dict>}
 INSERT INTO COLLECTION <collection_name> VALUES {<dict>} USING MODEL '<model_name>'
+INSERT INTO COLLECTION <collection_name> VALUES {<dict>} USING HYBRID
+INSERT INTO COLLECTION <collection_name> VALUES {<dict>} USING HYBRID DENSE MODEL '<model>' SPARSE MODEL '<model>'
 ```
 
 **Examples:**
@@ -198,25 +205,29 @@ Insert with a specific embedding model:
 INSERT INTO COLLECTION articles VALUES {'text': 'hello world'} USING MODEL 'BAAI/bge-small-en-v1.5'
 ```
 
-Insert with nested metadata and tags:
+Insert into a hybrid collection (dense + sparse BM25 vectors):
 ```sql
-INSERT INTO COLLECTION articles VALUES {
-  'text': 'Attention is all you need',
-  'meta': {'venue': 'NeurIPS', 'citations': 50000},
-  'tags': ['transformers', 'attention', 'nlp']
-}
+INSERT INTO COLLECTION articles VALUES {'text': 'Attention is all you need'} USING HYBRID
+```
+
+Insert with custom models for both dense and sparse:
+```sql
+INSERT INTO COLLECTION articles VALUES {'text': 'hello world'}
+  USING HYBRID DENSE MODEL 'BAAI/bge-base-en-v1.5' SPARSE MODEL 'prithivida/Splade_PP_en_v1'
 ```
 
 **What happens internally:**
 1. The `text` value is embedded into a dense vector using the configured model.
-2. A UUID is auto-generated as the point ID.
-3. All fields (including `text`) are stored in the payload.
-4. The point is upserted into Qdrant.
+2. In hybrid mode, a sparse BM25 vector is also generated.
+3. A UUID is auto-generated as the point ID.
+4. All fields (including `text`) are stored in the payload.
+5. The point is upserted into Qdrant.
 
 **Rules:**
 - `text` is always required. Omitting it raises an error.
 - A point ID (UUID) is generated automatically — you do not provide one.
 - If the collection already exists with a different vector size (from a different model), an error is raised with a clear message.
+- Hybrid inserts require a hybrid collection (created with `CREATE COLLECTION ... HYBRID` or auto-created on first `USING HYBRID` insert).
 
 ---
 
@@ -230,7 +241,9 @@ An optional `WHERE` clause filters the candidate set **before** similarity ranki
 ```
 SEARCH <collection_name> SIMILAR TO '<query_text>' LIMIT <n>
 SEARCH <collection_name> SIMILAR TO '<query_text>' LIMIT <n> USING MODEL '<model_name>'
-SEARCH <collection_name> SIMILAR TO '<query_text>' LIMIT <n> [USING MODEL '<model_name>'] WHERE <filter>
+SEARCH <collection_name> SIMILAR TO '<query_text>' LIMIT <n> [USING MODEL '<model>'] WHERE <filter>
+SEARCH <collection_name> SIMILAR TO '<query_text>' LIMIT <n> USING HYBRID
+SEARCH <collection_name> SIMILAR TO '<query_text>' LIMIT <n> USING HYBRID [DENSE MODEL '<model>'] [SPARSE MODEL '<model>'] [WHERE <filter>]
 ```
 
 **Examples:**
@@ -250,9 +263,14 @@ Search within a specific category, excluding drafts:
 SEARCH articles SIMILAR TO 'neural networks' LIMIT 5 WHERE category = 'ml' AND status != 'draft'
 ```
 
-Search with a model override and a filter:
+Hybrid search (combines dense semantic + sparse BM25 keyword retrieval via RRF):
 ```sql
-SEARCH articles SIMILAR TO 'embeddings' LIMIT 10 USING MODEL 'BAAI/bge-small-en-v1.5' WHERE year >= 2022
+SEARCH articles SIMILAR TO 'attention mechanism' LIMIT 10 USING HYBRID
+```
+
+Hybrid search with a WHERE filter:
+```sql
+SEARCH articles SIMILAR TO 'transformers' LIMIT 10 USING HYBRID WHERE year >= 2020
 ```
 
 **Output:**
@@ -266,7 +284,7 @@ Results are displayed as a table with three columns:
  0.8817 │ 7a1b2c3d-...                          │ {'text': 'Attention is all...', 'tags': [...]}
 ```
 
-- **Score** — cosine similarity score between 0 and 1. Higher is more similar.
+- **Score** — similarity score. Higher is more relevant.
 - **ID** — the UUID of the matching point.
 - **Payload** — all fields stored alongside the vector.
 
@@ -291,11 +309,8 @@ SEARCH articles SIMILAR TO 'ml' LIMIT 10 WHERE status != 'draft'
 #### Range comparisons
 
 ```sql
--- Greater than / less than
 SEARCH articles SIMILAR TO 'ai' LIMIT 5 WHERE score > 0.8
 SEARCH articles SIMILAR TO 'ai' LIMIT 5 WHERE year < 2024
-
--- Greater than or equal / less than or equal
 SEARCH articles SIMILAR TO 'ai' LIMIT 5 WHERE score >= 0.75
 SEARCH articles SIMILAR TO 'ai' LIMIT 5 WHERE year <= 2023
 ```
@@ -310,50 +325,36 @@ SEARCH articles SIMILAR TO 'history of ai' LIMIT 10 WHERE year BETWEEN 2018 AND 
 #### IN and NOT IN
 
 ```sql
--- Field value must be one of the listed values
 SEARCH articles SIMILAR TO 'retrieval' LIMIT 10 WHERE status IN ('published', 'reviewed')
-
--- Field value must not be any of the listed values
 SEARCH articles SIMILAR TO 'retrieval' LIMIT 10 WHERE status NOT IN ('deleted', 'archived')
-
--- Trailing commas are allowed
-SEARCH articles SIMILAR TO 'x' LIMIT 5 WHERE status IN ('a', 'b',)
 ```
 
 #### IS NULL and IS NOT NULL
 
 ```sql
--- Points where the reviewer field is absent or explicitly null
 SEARCH articles SIMILAR TO 'peer review' LIMIT 5 WHERE reviewer IS NULL
-
--- Points where reviewer is set to any non-null value
 SEARCH articles SIMILAR TO 'peer review' LIMIT 5 WHERE reviewer IS NOT NULL
 ```
 
 #### IS EMPTY and IS NOT EMPTY
 
 ```sql
--- Points where the tags list is empty
 SEARCH articles SIMILAR TO 'untagged' LIMIT 5 WHERE tags IS EMPTY
-
--- Points where the tags list has at least one element
 SEARCH articles SIMILAR TO 'categorized' LIMIT 5 WHERE tags IS NOT EMPTY
 ```
 
 #### Full-text MATCH
 
 ```sql
--- All terms in the string must appear in the field (full-text index required)
+-- All terms must appear in the field (requires a Qdrant full-text index)
 SEARCH articles SIMILAR TO 'search' LIMIT 10 WHERE title MATCH 'vector database'
 
--- Any term in the string can match
+-- Any term can match
 SEARCH articles SIMILAR TO 'search' LIMIT 10 WHERE title MATCH ANY 'embedding retrieval'
 
--- The exact phrase must appear
+-- Exact phrase must appear
 SEARCH articles SIMILAR TO 'search' LIMIT 10 WHERE title MATCH PHRASE 'semantic search'
 ```
-
-> Full-text MATCH requires a Qdrant full-text index on the field. Create one in the Qdrant dashboard or via the SDK before using MATCH filters.
 
 #### AND, OR, NOT — logical operators
 
@@ -369,10 +370,6 @@ SEARCH articles SIMILAR TO 'llm' LIMIT 10 WHERE source = 'arxiv' OR source = 'pu
 -- NOT: negate a condition
 SEARCH articles SIMILAR TO 'benchmark' LIMIT 10 WHERE NOT status = 'draft'
 
--- Chained AND (three conditions, all must hold)
-SEARCH articles SIMILAR TO 'deep learning' LIMIT 20
-  WHERE year >= 2019 AND category = 'cv' AND status != 'retracted'
-
 -- Parentheses to group OR inside AND
 SEARCH articles SIMILAR TO 'conference paper' LIMIT 10
   WHERE (source = 'arxiv' OR source = 'ieee') AND year >= 2022
@@ -383,26 +380,16 @@ SEARCH articles SIMILAR TO 'x' LIMIT 5 WHERE NOT (status = 'draft' OR status = '
 
 #### Dot-notation for nested fields
 
-Qdrant supports nested payload fields accessed with dot notation. Use the same path syntax in `WHERE`:
-
 ```sql
--- Filter on meta.source nested field
 SEARCH articles SIMILAR TO 'wikipedia' LIMIT 5 WHERE meta.source = 'web'
-
--- Filter on a deeply nested array field
 SEARCH cities SIMILAR TO 'large city' LIMIT 5 WHERE country.cities[].population > 1000000
 ```
 
-#### Combined example
+#### WHERE also works in hybrid mode
 
 ```sql
--- Semantic search over research papers:
--- must be from arxiv or IEEE, published 2020–2023, not retracted, with a reviewer assigned
-SEARCH papers SIMILAR TO 'attention mechanism transformers' LIMIT 20
-  WHERE (source = 'arxiv' OR source = 'ieee')
-    AND year BETWEEN 2020 AND 2023
-    AND status != 'retracted'
-    AND reviewer IS NOT NULL
+SEARCH articles SIMILAR TO 'deep learning' LIMIT 10
+  USING HYBRID WHERE year BETWEEN 2020 AND 2024 AND status = 'published'
 ```
 
 #### Full filter reference
@@ -430,6 +417,94 @@ SEARCH papers SIMILAR TO 'attention mechanism transformers' LIMIT 20
 | `NOT A` | Condition must not hold |
 | `(A OR B) AND C` | Parentheses for grouping |
 | `meta.source = 'x'` | Dot-notation nested field |
+
+---
+
+### Hybrid Search (USING HYBRID)
+
+Hybrid search combines **dense semantic vectors** and **sparse BM25 keyword vectors** in a single query and merges the results with Qdrant's **Reciprocal Rank Fusion (RRF)** algorithm. This typically outperforms either method alone — semantic search handles paraphrases and synonyms, while BM25 handles exact keyword matches.
+
+#### How it works internally
+
+1. Both a dense vector (`TextEmbedding`) and a sparse BM25 vector (`SparseTextEmbedding`) are generated from your query text.
+2. Qdrant fetches the top candidates from each index independently (`prefetch limit = LIMIT × 4`).
+3. The two result lists are merged using RRF — a rank-based fusion that does not require score normalization.
+4. The final top-N results are returned.
+
+#### Step 1: Create a hybrid collection
+
+A hybrid collection stores both a named dense vector (`"dense"`) and a named sparse vector (`"sparse"`):
+
+```sql
+CREATE COLLECTION articles HYBRID
+```
+
+This is equivalent to calling Qdrant with:
+```python
+vectors_config={"dense": VectorParams(size=384, distance=COSINE)},
+sparse_vectors_config={"sparse": SparseVectorParams(modifier=IDF)}
+```
+
+#### Step 2: Insert with hybrid vectors
+
+```sql
+-- Uses default dense model + Qdrant/bm25 sparse model
+INSERT INTO COLLECTION articles VALUES {
+  'text': 'Attention is all you need',
+  'author': 'Vaswani et al.',
+  'year': 2017
+} USING HYBRID
+```
+
+If the collection does not exist yet, it is created automatically as a hybrid collection on the first `USING HYBRID` insert.
+
+#### Step 3: Search with hybrid retrieval
+
+```sql
+-- Basic hybrid search
+SEARCH articles SIMILAR TO 'transformer architecture' LIMIT 10 USING HYBRID
+
+-- Hybrid search with a WHERE filter
+SEARCH articles SIMILAR TO 'attention' LIMIT 10 USING HYBRID WHERE year >= 2017
+
+-- Hybrid with custom dense model
+SEARCH articles SIMILAR TO 'embeddings' LIMIT 5
+  USING HYBRID DENSE MODEL 'BAAI/bge-base-en-v1.5'
+
+-- Hybrid with both custom models
+SEARCH articles SIMILAR TO 'sparse retrieval' LIMIT 5
+  USING HYBRID DENSE MODEL 'BAAI/bge-base-en-v1.5' SPARSE MODEL 'prithivida/Splade_PP_en_v1'
+
+-- Order of DENSE MODEL / SPARSE MODEL doesn't matter
+SEARCH articles SIMILAR TO 'sparse retrieval' LIMIT 5
+  USING HYBRID SPARSE MODEL 'prithivida/Splade_PP_en_v1' DENSE MODEL 'BAAI/bge-base-en-v1.5'
+```
+
+#### Model defaults in hybrid mode
+
+| Argument | Default |
+|---|---|
+| Dense model | `self._config.default_model` (same as non-hybrid) |
+| Sparse model | `Qdrant/bm25` |
+
+Both can be overridden independently with `DENSE MODEL` and `SPARSE MODEL`.
+
+#### Dense vs. hybrid — when to use which
+
+| Situation | Recommendation |
+|---|---|
+| Semantic similarity (paraphrasing, synonyms) | Dense only |
+| Exact keyword matching (product codes, names) | Hybrid or BM25-only |
+| General-purpose retrieval (unknown query distribution) | Hybrid |
+| Low latency / small collection | Dense only |
+
+#### Supported sparse models (Fastembed)
+
+| Model | Notes |
+|---|---|
+| `Qdrant/bm25` | Default. Classic BM25 with IDF weighting |
+| `prithivida/Splade_PP_en_v1` | SPLADE++ English, strong keyword + semantic overlap |
+| `Qdrant/Unicoil` | UniCOIL sparse encoder |
 
 ---
 
@@ -468,11 +543,19 @@ Explicitly creates a new empty collection. Collections are also created automati
 **Syntax:**
 ```
 CREATE COLLECTION <collection_name>
+CREATE COLLECTION <collection_name> HYBRID
 ```
 
-**Example:**
+**Examples:**
+
+Dense-only collection (standard):
 ```sql
 CREATE COLLECTION research_papers
+```
+
+Hybrid collection (dense + sparse BM25):
+```sql
+CREATE COLLECTION research_papers HYBRID
 ```
 
 The collection is created using the **default embedding model's dimensions** (384 for `all-MiniLM-L6-v2`) with **cosine distance**.
@@ -529,7 +612,7 @@ To find a point's ID, run a SEARCH first and copy the ID from the results table.
 
 QQL uses [Fastembed](https://github.com/qdrant/fastembed) to convert text into vectors locally — no external API call is needed.
 
-### Default model
+### Dense embedding (default)
 
 ```
 sentence-transformers/all-MiniLM-L6-v2
@@ -539,22 +622,37 @@ sentence-transformers/all-MiniLM-L6-v2
 - Size: ~90 MB (downloaded on first use, cached locally)
 - Good balance of speed and quality for English text
 
-### Specifying a different model
+### Sparse embedding (hybrid mode default)
 
-Add `USING MODEL '<model_name>'` to INSERT or SEARCH:
+```
+Qdrant/bm25
+```
+
+- Classic BM25 with IDF weighting
+- Indices and values are generated as a sparse vector; no fixed dimensions
+- Uses asymmetric encoding: `embed()` for documents, `query_embed()` for queries
+
+### Specifying models
+
+Add `USING MODEL '<model_name>'` for dense-only mode, or `DENSE MODEL` / `SPARSE MODEL` after `USING HYBRID`:
 
 ```sql
+-- Dense only with custom model
 INSERT INTO docs VALUES {'text': 'hello'} USING MODEL 'BAAI/bge-small-en-v1.5'
 SEARCH docs SIMILAR TO 'hello' LIMIT 5 USING MODEL 'BAAI/bge-small-en-v1.5'
+
+-- Hybrid with custom dense model
+SEARCH docs SIMILAR TO 'hello' LIMIT 5 USING HYBRID DENSE MODEL 'BAAI/bge-base-en-v1.5'
+
+-- Hybrid with custom sparse model
+SEARCH docs SIMILAR TO 'hello' LIMIT 5 USING HYBRID SPARSE MODEL 'prithivida/Splade_PP_en_v1'
+
+-- Hybrid with both custom
+SEARCH docs SIMILAR TO 'hello' LIMIT 5
+  USING HYBRID DENSE MODEL 'BAAI/bge-base-en-v1.5' SPARSE MODEL 'prithivida/Splade_PP_en_v1'
 ```
 
-`USING MODEL` and `WHERE` can be combined:
-
-```sql
-SEARCH docs SIMILAR TO 'hello' LIMIT 5 USING MODEL 'BAAI/bge-small-en-v1.5' WHERE year >= 2022
-```
-
-### Commonly available Fastembed models
+### Commonly available dense models (Fastembed)
 
 | Model | Dimensions | Notes |
 |---|---|---|
@@ -563,6 +661,14 @@ SEARCH docs SIMILAR TO 'hello' LIMIT 5 USING MODEL 'BAAI/bge-small-en-v1.5' WHER
 | `BAAI/bge-base-en-v1.5` | 768 | Higher quality, larger size |
 | `BAAI/bge-large-en-v1.5` | 1024 | Best quality, slowest |
 | `sentence-transformers/all-mpnet-base-v2` | 768 | Strong semantic similarity |
+
+### Commonly available sparse models (Fastembed)
+
+| Model | Notes |
+|---|---|
+| `Qdrant/bm25` | Default sparse model. Classic BM25 + IDF |
+| `prithivida/Splade_PP_en_v1` | SPLADE++ — strong keyword + semantic overlap |
+| `Qdrant/Unicoil` | UniCOIL sparse encoder |
 
 > Models are downloaded automatically on first use and cached by Fastembed. Loading a new model for the first time takes a few seconds.
 
@@ -628,7 +734,7 @@ The connection config is stored at `~/.qql/config.json`:
 |---|---|
 | `url` | Qdrant instance URL |
 | `secret` | API key (null if not required) |
-| `default_model` | Embedding model used when no `USING MODEL` clause is given |
+| `default_model` | Dense embedding model used when no `USING MODEL` clause is given |
 
 You can edit this file directly to change the default model without reconnecting:
 
@@ -649,7 +755,7 @@ QQL can also be used as a Python library without the CLI:
 ```python
 from qql import run_query
 
-# Insert a document
+# Insert a document (dense-only)
 result = run_query(
     "INSERT INTO COLLECTION notes VALUES {'text': 'hello world', 'author': 'alice', 'year': 2024}",
     url="http://localhost:6333",
@@ -657,17 +763,24 @@ result = run_query(
 print(result.message)   # "Inserted 1 point [<uuid>]"
 print(result.data)      # {"id": "...", "collection": "notes"}
 
-# Basic search
+# Insert with hybrid vectors
 result = run_query(
-    "SEARCH notes SIMILAR TO 'hello' LIMIT 5",
+    "INSERT INTO COLLECTION notes VALUES {'text': 'hello world'} USING HYBRID",
+    url="http://localhost:6333",
+)
+print(result.message)   # "Inserted 1 point [<uuid>] (hybrid)"
+
+# Dense search with WHERE filter
+result = run_query(
+    "SEARCH notes SIMILAR TO 'hello' LIMIT 5 WHERE year >= 2023 AND author != 'bot'",
     url="http://localhost:6333",
 )
 for hit in result.data:
-    print(hit["score"], hit["id"], hit["payload"])
+    print(hit["score"], hit["payload"])
 
-# Search with a WHERE filter
+# Hybrid search with WHERE filter
 result = run_query(
-    "SEARCH notes SIMILAR TO 'hello' LIMIT 5 WHERE year >= 2023 AND author != 'bot'",
+    "SEARCH notes SIMILAR TO 'hello' LIMIT 5 USING HYBRID WHERE year >= 2023",
     url="http://localhost:6333",
 )
 for hit in result.data:
@@ -687,7 +800,7 @@ client = QdrantClient(url="http://localhost:6333")
 config = QQLConfig(url="http://localhost:6333")
 executor = Executor(client, config)
 
-query = "SEARCH articles SIMILAR TO 'deep learning' LIMIT 10 WHERE category = 'cv'"
+query = "SEARCH articles SIMILAR TO 'deep learning' LIMIT 10 USING HYBRID WHERE category = 'cv'"
 tokens = Lexer().tokenize(query)
 node = Parser(tokens).parse()
 result = executor.execute(node)
@@ -710,7 +823,8 @@ class ExecutionResult:
 
 | Operation | `result.data` type |
 |---|---|
-| INSERT | `{"id": "<uuid>", "collection": "<name>"}` |
+| INSERT (dense) | `{"id": "<uuid>", "collection": "<name>"}` |
+| INSERT (hybrid) | `{"id": "<uuid>", "collection": "<name>"}` |
 | SEARCH | `[{"id": str, "score": float, "payload": dict}, ...]` |
 | SHOW COLLECTIONS | `["name1", "name2", ...]` |
 | CREATE COLLECTION | `None` |
@@ -733,12 +847,12 @@ qql/
 │       ├── lexer.py        # Tokenizer: string → List[Token]
 │       ├── ast_nodes.py    # Frozen dataclasses for each statement and filter type
 │       ├── parser.py       # Recursive descent parser: tokens → AST node
-│       ├── embedder.py     # Fastembed wrapper with per-model cache
-│       └── executor.py     # AST node → Qdrant client call + filter conversion
+│       ├── embedder.py     # Embedder (dense) + SparseEmbedder (BM25) with per-model cache
+│       └── executor.py     # AST node → Qdrant client call + filter + hybrid search
 └── tests/
-    ├── test_lexer.py       # Tokenizer unit tests (keywords, operators, dot-paths)
-    ├── test_parser.py      # Parser unit tests (all statements + WHERE filters)
-    └── test_executor.py    # Executor unit tests (mocked Qdrant client + filter builders)
+    ├── test_lexer.py       # Tokenizer unit tests (keywords, operators, dot-paths, hybrid tokens)
+    ├── test_parser.py      # Parser unit tests (all statements + WHERE filters + hybrid clauses)
+    └── test_executor.py    # Executor unit tests (mocked Qdrant client, filter builders, hybrid ops)
 ```
 
 ---
@@ -751,7 +865,7 @@ Tests do not require a running Qdrant instance — the Qdrant client is mocked.
 pytest tests/ -v
 ```
 
-Expected output: **118 tests passing**.
+Expected output: **169 tests passing**.
 
 ---
 
@@ -769,3 +883,4 @@ Expected output: **118 tests passing**.
 | `Unexpected character '@' (at position N)` | A character not part of QQL syntax | Remove or quote the offending character |
 | `Expected a filter operator after field '...'` | Unknown operator in WHERE clause | Use one of: `=`, `!=`, `>`, `>=`, `<`, `<=`, `IN`, `NOT IN`, `BETWEEN`, `IS NULL`, `IS NOT NULL`, `IS EMPTY`, `IS NOT EMPTY`, `MATCH` |
 | `Expected ')' ...` | Unclosed parenthesis in WHERE clause | Add the missing `)` to close the group |
+| `Qdrant error during SEARCH: ...` | Hybrid search on a non-hybrid collection, or wrong vector names | Ensure the collection was created with `HYBRID` before using `USING HYBRID` in INSERT/SEARCH |

@@ -10,6 +10,8 @@ from qdrant_client.models import (
     Distance,
     FieldCondition,
     Filter,
+    Fusion,
+    FusionQuery,
     IsEmptyCondition,
     IsNullCondition,
     MatchAny,
@@ -18,9 +20,13 @@ from qdrant_client.models import (
     MatchText,
     MatchTextAny,
     MatchValue,
+    Modifier,
     PayloadField,
     PointStruct,
+    Prefetch,
     Range,
+    SparseVector,
+    SparseVectorParams,
     VectorParams,
 )
 
@@ -49,7 +55,7 @@ from .ast_nodes import (
     ShowCollectionsStmt,
 )
 from .config import QQLConfig
-from .embedder import Embedder
+from .embedder import Embedder, SparseEmbedder
 from .exceptions import QQLRuntimeError
 
 
@@ -86,6 +92,56 @@ class Executor:
         if "text" not in node.values:
             raise QQLRuntimeError("INSERT requires a 'text' field in VALUES")
 
+        # ── Hybrid INSERT: dense + sparse vectors ──────────────────────────
+        if node.hybrid:
+            dense_model = node.model or self._config.default_model
+            sparse_model_name = node.sparse_model or SparseEmbedder.DEFAULT_MODEL
+            dense_embedder = Embedder(dense_model)
+            sparse_embedder = SparseEmbedder(sparse_model_name)
+
+            dense_vector = dense_embedder.embed(node.values["text"])
+            sparse_obj = sparse_embedder.embed(node.values["text"])
+            sparse_vector = SparseVector(
+                indices=sparse_obj["indices"],
+                values=sparse_obj["values"],
+            )
+
+            # Auto-create hybrid collection if it doesn't exist yet
+            if not self._client.collection_exists(node.collection):
+                self._client.create_collection(
+                    collection_name=node.collection,
+                    vectors_config={
+                        "dense": VectorParams(
+                            size=len(dense_vector), distance=Distance.COSINE
+                        )
+                    },
+                    sparse_vectors_config={
+                        "sparse": SparseVectorParams(modifier=Modifier.IDF)
+                    },
+                )
+
+            point_id = str(uuid.uuid4())
+            try:
+                self._client.upsert(
+                    collection_name=node.collection,
+                    points=[
+                        PointStruct(
+                            id=point_id,
+                            vector={"dense": dense_vector, "sparse": sparse_vector},
+                            payload=dict(node.values),
+                        )
+                    ],
+                )
+            except UnexpectedResponse as e:
+                raise QQLRuntimeError(f"Qdrant error during INSERT: {e}") from e
+
+            return ExecutionResult(
+                success=True,
+                message=f"Inserted 1 point [{point_id}] (hybrid)",
+                data={"id": point_id, "collection": node.collection},
+            )
+
+        # ── Standard dense-only INSERT ─────────────────────────────────────
         model_name = node.model or self._config.default_model
         embedder = Embedder(model_name)
         vector = embedder.embed(node.values["text"])
@@ -115,6 +171,29 @@ class Executor:
                 success=True,
                 message=f"Collection '{node.collection}' already exists",
             )
+
+        # ── Hybrid collection: named dense + sparse vectors ────────────────
+        if node.hybrid:
+            embedder = Embedder(self._config.default_model)
+            dims = embedder.dimensions
+            self._client.create_collection(
+                collection_name=node.collection,
+                vectors_config={
+                    "dense": VectorParams(size=dims, distance=Distance.COSINE)
+                },
+                sparse_vectors_config={
+                    "sparse": SparseVectorParams(modifier=Modifier.IDF)
+                },
+            )
+            return ExecutionResult(
+                success=True,
+                message=(
+                    f"Collection '{node.collection}' created "
+                    f"(hybrid: {dims}-dim dense + BM25 sparse, cosine distance)"
+                ),
+            )
+
+        # ── Standard dense-only collection ─────────────────────────────────
         embedder = Embedder(self._config.default_model)
         dims = embedder.dimensions
         self._client.create_collection(
@@ -148,15 +227,63 @@ class Executor:
         if not self._client.collection_exists(node.collection):
             raise QQLRuntimeError(f"Collection '{node.collection}' does not exist")
 
-        model_name = node.model or self._config.default_model
-        embedder = Embedder(model_name)
-        vector = embedder.embed(node.query_text)
-
+        # Build WHERE filter (shared by both hybrid and dense-only paths)
         qdrant_filter: Filter | None = None
         if node.query_filter is not None:
             qdrant_filter = self._wrap_as_filter(
                 self._build_qdrant_filter(node.query_filter)
             )
+
+        # ── Hybrid SEARCH: prefetch dense+sparse, fuse with RRF ───────────
+        if node.hybrid:
+            dense_model = node.model or self._config.default_model
+            sparse_model_name = node.sparse_model or SparseEmbedder.DEFAULT_MODEL
+            dense_embedder = Embedder(dense_model)
+            sparse_embedder = SparseEmbedder(sparse_model_name)
+
+            dense_vector = dense_embedder.embed(node.query_text)
+            sparse_obj = sparse_embedder.query_embed(node.query_text)
+            sparse_vector = SparseVector(
+                indices=sparse_obj["indices"],
+                values=sparse_obj["values"],
+            )
+
+            try:
+                response = self._client.query_points(
+                    collection_name=node.collection,
+                    prefetch=[
+                        Prefetch(
+                            query=dense_vector,
+                            using="dense",
+                            limit=node.limit * 4,
+                        ),
+                        Prefetch(
+                            query=sparse_vector,
+                            using="sparse",
+                            limit=node.limit * 4,
+                        ),
+                    ],
+                    query=FusionQuery(fusion=Fusion.RRF),
+                    limit=node.limit,
+                    query_filter=qdrant_filter,
+                )
+            except UnexpectedResponse as e:
+                raise QQLRuntimeError(f"Qdrant error during SEARCH: {e}") from e
+
+            results = [
+                {"id": str(h.id), "score": round(h.score, 4), "payload": h.payload}
+                for h in response.points
+            ]
+            return ExecutionResult(
+                success=True,
+                message=f"Found {len(results)} result(s) (hybrid)",
+                data=results,
+            )
+
+        # ── Standard dense-only SEARCH ─────────────────────────────────────
+        model_name = node.model or self._config.default_model
+        embedder = Embedder(model_name)
+        vector = embedder.embed(node.query_text)
 
         try:
             response = self._client.query_points(
@@ -293,16 +420,26 @@ class Executor:
     # ── Collection helpers ────────────────────────────────────────────────
 
     def _ensure_collection(self, name: str, vector_size: int) -> None:
-        """Create the collection if it doesn't exist. Raises on dimension mismatch."""
+        """Create the collection if it doesn't exist. Raises on dimension mismatch.
+
+        For named-vector (hybrid) collections the validation is skipped — those
+        collections are managed directly by the hybrid insert/create paths.
+        """
         if self._client.collection_exists(name):
             info = self._client.get_collection(name)
-            existing_size = info.config.params.vectors.size  # type: ignore[union-attr]
-            if existing_size != vector_size:
-                raise QQLRuntimeError(
-                    f"Vector dimension mismatch: collection '{name}' expects "
-                    f"{existing_size} dims, but model produces {vector_size} dims. "
-                    f"Specify a compatible model with USING MODEL '<model>'."
-                )
+            vectors = info.config.params.vectors  # type: ignore[union-attr]
+            if isinstance(vectors, dict):
+                # Named-vector (hybrid) collection — skip validation here;
+                # the hybrid insert path manages its own collection creation.
+                pass
+            else:
+                # Unnamed single-vector collection: validate dimensions
+                if vectors.size != vector_size:
+                    raise QQLRuntimeError(
+                        f"Vector dimension mismatch: collection '{name}' expects "
+                        f"{vectors.size} dims, but model produces {vector_size} dims. "
+                        f"Specify a compatible model with USING MODEL '<model>'."
+                    )
         else:
             self._client.create_collection(
                 collection_name=name,
