@@ -17,6 +17,12 @@ qql> SEARCH notes SIMILAR TO 'vector databases' LIMIT 5 USING HYBRID
  Score  │ ID                                   │ Payload
 ────────┼──────────────────────────────────────┼──────────────────────────────────────
  0.9102 │ 3f2e1a4b-8c91-4d0e-b123-abc123def456 │ {'text': 'Qdrant is a ...', 'author': 'alice', 'year': 2024}
+
+qql> SEARCH notes SIMILAR TO 'vector databases' LIMIT 5 USING HYBRID RERANK
+✓ Found 1 result(s) (hybrid, reranked)
+ Score  │ ID                                   │ Payload
+────────┼──────────────────────────────────────┼──────────────────────────────────────
+ 5.3714 │ 3f2e1a4b-8c91-4d0e-b123-abc123def456 │ {'text': 'Qdrant is a ...', 'author': 'alice', 'year': 2024}
 ```
 
 ---
@@ -32,6 +38,7 @@ qql> SEARCH notes SIMILAR TO 'vector databases' LIMIT 5 USING HYBRID
   - [SEARCH — find similar points](#search--find-similar-points)
   - [WHERE Clause Filters](#where-clause-filters)
   - [Hybrid Search (USING HYBRID)](#hybrid-search-using-hybrid)
+  - [Cross-Encoder Reranking (RERANK)](#cross-encoder-reranking-rerank)
   - [SHOW COLLECTIONS — list collections](#show-collections--list-collections)
   - [CREATE COLLECTION — create a collection](#create-collection--create-a-collection)
   - [DROP COLLECTION — delete a collection](#drop-collection--delete-a-collection)
@@ -244,6 +251,7 @@ SEARCH <collection_name> SIMILAR TO '<query_text>' LIMIT <n> USING MODEL '<model
 SEARCH <collection_name> SIMILAR TO '<query_text>' LIMIT <n> [USING MODEL '<model>'] WHERE <filter>
 SEARCH <collection_name> SIMILAR TO '<query_text>' LIMIT <n> USING HYBRID
 SEARCH <collection_name> SIMILAR TO '<query_text>' LIMIT <n> USING HYBRID [DENSE MODEL '<model>'] [SPARSE MODEL '<model>'] [WHERE <filter>]
+SEARCH <collection_name> SIMILAR TO '<query_text>' LIMIT <n> [USING ...] [WHERE <filter>] RERANK [MODEL '<reranker_model>']
 ```
 
 **Examples:**
@@ -508,6 +516,95 @@ Both can be overridden independently with `DENSE MODEL` and `SPARSE MODEL`.
 
 ---
 
+### Cross-Encoder Reranking (RERANK)
+
+Appending `RERANK` to any SEARCH statement activates a **second-pass relevance scoring** step using a [cross-encoder](https://www.sbert.net/examples/applications/cross-encoder/README.html) model. Unlike bi-encoders (which encode query and document independently), a cross-encoder processes the **(query, document)** pair jointly, producing a more accurate relevance score at the cost of extra compute.
+
+#### How it works internally
+
+1. Qdrant executes the normal dense or hybrid search, but fetches `LIMIT × 4` candidates instead of just `LIMIT` — giving the reranker enough material to work with.
+2. Each candidate's `payload["text"]` is paired with the original query text.
+3. The cross-encoder scores all (query, document) pairs in one batch.
+4. Results are sorted **descending by cross-encoder score** and sliced to `LIMIT`.
+5. The `score` column in the output reflects the cross-encoder relevance score (raw logits — higher is more relevant).
+
+#### Syntax
+
+```
+SEARCH <name> SIMILAR TO '<query>' LIMIT <n> RERANK
+SEARCH <name> SIMILAR TO '<query>' LIMIT <n> RERANK MODEL '<cross_encoder_model>'
+```
+
+`RERANK` must come **after** any `USING` and `WHERE` clauses:
+
+```
+SEARCH ... LIMIT n [USING ...] [WHERE ...] RERANK [MODEL '...']
+```
+
+#### Examples
+
+Dense search + rerank (default cross-encoder):
+```sql
+SEARCH articles SIMILAR TO 'machine learning for healthcare' LIMIT 5 RERANK
+```
+
+Hybrid search + rerank (best of all three worlds):
+```sql
+SEARCH articles SIMILAR TO 'attention mechanism in transformers' LIMIT 10 USING HYBRID RERANK
+```
+
+Dense search + WHERE filter + rerank:
+```sql
+SEARCH articles SIMILAR TO 'deep learning' LIMIT 10 WHERE year > 2020 RERANK
+```
+
+Custom cross-encoder model:
+```sql
+SEARCH articles SIMILAR TO 'semantic search' LIMIT 5
+  RERANK MODEL 'cross-encoder/ms-marco-MiniLM-L-6-v2'
+```
+
+All clauses combined:
+```sql
+SEARCH articles SIMILAR TO 'neural IR' LIMIT 10
+  USING HYBRID DENSE MODEL 'BAAI/bge-base-en-v1.5'
+  WHERE year >= 2020
+  RERANK MODEL 'cross-encoder/ms-marco-MiniLM-L-6-v2'
+```
+
+#### Default cross-encoder model
+
+```
+cross-encoder/ms-marco-MiniLM-L-6-v2
+```
+
+- A lightweight but effective passage reranker fine-tuned on MS MARCO.
+- Downloaded on first use and cached locally by Fastembed.
+- No additional packages needed — `TextCrossEncoder` is included in the `fastembed` package.
+
+#### Commonly available cross-encoder models (Fastembed)
+
+| Model | Notes |
+|---|---|
+| `cross-encoder/ms-marco-MiniLM-L-6-v2` | Default. Fast and accurate for passage reranking |
+| `cross-encoder/ms-marco-MiniLM-L-12-v2` | Larger, higher quality, slower |
+| `BAAI/bge-reranker-base` | BGE reranker, strong general-purpose performance |
+| `BAAI/bge-reranker-large` | Highest quality BGE reranker, slower |
+
+#### When to use RERANK
+
+| Situation | Recommendation |
+|---|---|
+| High-precision retrieval (legal, medical, research) | Add `RERANK` |
+| Small LIMIT (top-3 or top-5 results) | Very effective — reranker focuses precision |
+| Low latency required | Skip `RERANK` (adds ~100–500 ms per batch) |
+| Large collections with keyword-heavy queries | `USING HYBRID RERANK` for best coverage + precision |
+| General-purpose semantic search | Optional; `RERANK` improves quality at mild cost |
+
+> **Note on scores:** After reranking, the `score` column shows the cross-encoder's raw logit (can be any real number, unbounded). Do not compare reranked scores to non-reranked cosine similarity scores — they are on different scales.
+
+---
+
 ### SHOW COLLECTIONS — list collections
 
 Lists all collections in the connected Qdrant instance.
@@ -669,6 +766,25 @@ SEARCH docs SIMILAR TO 'hello' LIMIT 5
 | `Qdrant/bm25` | Default sparse model. Classic BM25 + IDF |
 | `prithivida/Splade_PP_en_v1` | SPLADE++ — strong keyword + semantic overlap |
 | `Qdrant/Unicoil` | UniCOIL sparse encoder |
+
+### Cross-encoder reranking (RERANK default)
+
+```
+cross-encoder/ms-marco-MiniLM-L-6-v2
+```
+
+- A passage reranker fine-tuned on MS MARCO.
+- No new dependencies — `TextCrossEncoder` is included in the `fastembed` package.
+- Override with `RERANK MODEL '<model_name>'`.
+
+### Commonly available cross-encoder models (Fastembed)
+
+| Model | Notes |
+|---|---|
+| `cross-encoder/ms-marco-MiniLM-L-6-v2` | Default. Fast passage reranker |
+| `cross-encoder/ms-marco-MiniLM-L-12-v2` | Larger, higher quality |
+| `BAAI/bge-reranker-base` | Strong general-purpose reranker |
+| `BAAI/bge-reranker-large` | Highest quality, slower |
 
 > Models are downloaded automatically on first use and cached by Fastembed. Loading a new model for the first time takes a few seconds.
 
@@ -847,7 +963,7 @@ qql/
 │       ├── lexer.py        # Tokenizer: string → List[Token]
 │       ├── ast_nodes.py    # Frozen dataclasses for each statement and filter type
 │       ├── parser.py       # Recursive descent parser: tokens → AST node
-│       ├── embedder.py     # Embedder (dense) + SparseEmbedder (BM25) with per-model cache
+│       ├── embedder.py     # Embedder (dense) + SparseEmbedder (BM25) + CrossEncoderEmbedder (rerank)
 │       └── executor.py     # AST node → Qdrant client call + filter + hybrid search
 └── tests/
     ├── test_lexer.py       # Tokenizer unit tests (keywords, operators, dot-paths, hybrid tokens)
@@ -865,7 +981,7 @@ Tests do not require a running Qdrant instance — the Qdrant client is mocked.
 pytest tests/ -v
 ```
 
-Expected output: **169 tests passing**.
+Expected output: **193 tests passing**.
 
 ---
 

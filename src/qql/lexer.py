@@ -15,6 +15,7 @@ class TokenKind(Enum):
     HYBRID = auto()
     DENSE = auto()
     SPARSE = auto()
+    RERANK = auto()
     CREATE = auto()
     DROP = auto()
     SHOW = auto()
@@ -75,6 +76,7 @@ _KEYWORDS: dict[str, TokenKind] = {
     "HYBRID": TokenKind.HYBRID,
     "DENSE": TokenKind.DENSE,
     "SPARSE": TokenKind.SPARSE,
+    "RERANK": TokenKind.RERANK,
     "CREATE": TokenKind.CREATE,
     "DROP": TokenKind.DROP,
     "SHOW": TokenKind.SHOW,

@@ -229,3 +229,27 @@ class TestHybridKeyword:
         tokens = tokenize("sparse.value")
         assert tokens[0].kind == TokenKind.IDENTIFIER
         assert tokens[0].value == "sparse.value"
+
+
+class TestRerankKeyword:
+    def test_rerank_keyword_uppercase(self):
+        ks = kinds("RERANK")
+        assert ks[0] == TokenKind.RERANK
+
+    def test_rerank_keyword_lowercase(self):
+        ks = kinds("rerank")
+        assert ks[0] == TokenKind.RERANK
+
+    def test_rerank_keyword_mixed_case(self):
+        ks = kinds("Rerank")
+        assert ks[0] == TokenKind.RERANK
+
+    def test_rerank_in_search_statement(self):
+        ks = kinds("SEARCH col SIMILAR TO 'q' LIMIT 5 RERANK")
+        assert TokenKind.RERANK in ks
+
+    def test_rerank_with_model_in_search(self):
+        ks = kinds("SEARCH col SIMILAR TO 'q' LIMIT 5 RERANK MODEL 'x'")
+        rerank_idx = ks.index(TokenKind.RERANK)
+        assert ks[rerank_idx + 1] == TokenKind.MODEL
+        assert ks[rerank_idx + 2] == TokenKind.STRING

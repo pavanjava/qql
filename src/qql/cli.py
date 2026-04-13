@@ -42,6 +42,7 @@ Available statements:
       Optional: [yellow]USING MODEL[/yellow] '<model>'
       Optional: [yellow]USING HYBRID[/yellow] [DENSE MODEL '<model>'] [SPARSE MODEL '<model>']
       Optional: [yellow]WHERE[/yellow] <filter>   (e.g. WHERE year > 2020 AND status = 'ok')
+      Optional: [yellow]RERANK[/yellow] [MODEL '<model>']   rerank results with a cross-encoder
 
   [yellow]DELETE FROM[/yellow] <name> [yellow]WHERE id =[/yellow] '<id>'
       Delete a point by its ID.

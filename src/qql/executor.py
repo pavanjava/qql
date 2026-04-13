@@ -55,7 +55,9 @@ from .ast_nodes import (
     ShowCollectionsStmt,
 )
 from .config import QQLConfig
-from .embedder import Embedder, SparseEmbedder
+from .embedder import CrossEncoderEmbedder, Embedder, SparseEmbedder
+
+_RERANK_FETCH_MULTIPLIER = 4
 from .exceptions import QQLRuntimeError
 
 
@@ -234,6 +236,10 @@ class Executor:
                 self._build_qdrant_filter(node.query_filter)
             )
 
+        # When reranking is requested, fetch more candidates so the reranker has
+        # enough material to reorder; only `node.limit` results are returned.
+        fetch_limit = node.limit * _RERANK_FETCH_MULTIPLIER if node.rerank else node.limit
+
         # ── Hybrid SEARCH: prefetch dense+sparse, fuse with RRF ───────────
         if node.hybrid:
             dense_model = node.model or self._config.default_model
@@ -264,7 +270,7 @@ class Executor:
                         ),
                     ],
                     query=FusionQuery(fusion=Fusion.RRF),
-                    limit=node.limit,
+                    limit=fetch_limit,
                     query_filter=qdrant_filter,
                 )
             except UnexpectedResponse as e:
@@ -274,6 +280,15 @@ class Executor:
                 {"id": str(h.id), "score": round(h.score, 4), "payload": h.payload}
                 for h in response.points
             ]
+
+            if node.rerank:
+                results = self._apply_reranking(node.query_text, results, node.limit, node.rerank_model)
+                return ExecutionResult(
+                    success=True,
+                    message=f"Found {len(results)} result(s) (hybrid, reranked)",
+                    data=results,
+                )
+
             return ExecutionResult(
                 success=True,
                 message=f"Found {len(results)} result(s) (hybrid)",
@@ -289,7 +304,7 @@ class Executor:
             response = self._client.query_points(
                 collection_name=node.collection,
                 query=vector,
-                limit=node.limit,
+                limit=fetch_limit,
                 query_filter=qdrant_filter,
             )
         except UnexpectedResponse as e:
@@ -299,11 +314,36 @@ class Executor:
             {"id": str(h.id), "score": round(h.score, 4), "payload": h.payload}
             for h in response.points
         ]
+
+        if node.rerank:
+            results = self._apply_reranking(node.query_text, results, node.limit, node.rerank_model)
+            return ExecutionResult(
+                success=True,
+                message=f"Found {len(results)} result(s) (reranked)",
+                data=results,
+            )
+
         return ExecutionResult(
             success=True,
             message=f"Found {len(results)} result(s)",
             data=results,
         )
+
+    def _apply_reranking(
+        self,
+        query: str,
+        results: list[dict],
+        limit: int,
+        rerank_model: str | None,
+    ) -> list[dict]:
+        """Re-score candidates with a cross-encoder and return top-``limit`` results."""
+        model_name = rerank_model or CrossEncoderEmbedder.DEFAULT_MODEL
+        reranker = CrossEncoderEmbedder(model_name)
+        texts = [r["payload"].get("text", "") for r in results]
+        scores = reranker.rerank(query, texts)
+        for r, s in zip(results, scores):
+            r["score"] = round(float(s), 4)
+        return sorted(results, key=lambda r: r["score"], reverse=True)[:limit]
 
     def _execute_delete(self, node: DeleteStmt) -> ExecutionResult:
         if not self._client.collection_exists(node.collection):
