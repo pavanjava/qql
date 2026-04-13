@@ -194,6 +194,24 @@ class TestSearch:
         assert search_params.hnsw_ef == 128
         assert search_params.acorn.enable is True
 
+    def test_dense_search_against_hybrid_collection_uses_dense_vector_name(
+        self, executor, mock_client, mocker
+    ):
+        from qdrant_client.models import VectorParams
+
+        mock_client.collection_exists.return_value = True
+        mock_client.get_collection.return_value.config.params.vectors = {
+            "dense": VectorParams(size=384, distance="Cosine")
+        }
+        mock_response = mocker.MagicMock()
+        mock_response.points = []
+        mock_client.query_points.return_value = mock_response
+
+        node = SearchStmt(collection="notes", query_text="hello", limit=5, model=None)
+        executor.execute(node)
+
+        assert mock_client.query_points.call_args.kwargs["using"] == "dense"
+
 
 class TestDelete:
     def test_delete_calls_qdrant_delete(self, executor, mock_client):

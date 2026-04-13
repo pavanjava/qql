@@ -1,6 +1,18 @@
 from __future__ import annotations
 
 
+def _load_text_cross_encoder_class():
+    """Load the fastembed cross-encoder class across package layouts."""
+    try:
+        from fastembed import TextCrossEncoder
+
+        return TextCrossEncoder
+    except ImportError:
+        from fastembed.rerank.cross_encoder.text_cross_encoder import TextCrossEncoder
+
+        return TextCrossEncoder
+
+
 class Embedder:
     DEFAULT_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 
@@ -76,7 +88,7 @@ class CrossEncoderEmbedder:
     qdrant-client[fastembed].
     """
 
-    DEFAULT_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    DEFAULT_MODEL = "Xenova/ms-marco-MiniLM-L-6-v2"
 
     # Class-level cache mirrors Embedder's pattern
     _cache: dict[str, object] = {}
@@ -84,9 +96,8 @@ class CrossEncoderEmbedder:
     def __init__(self, model_name: str = DEFAULT_MODEL) -> None:
         self._model_name = model_name
         if model_name not in CrossEncoderEmbedder._cache:
-            from fastembed import TextCrossEncoder
-
-            CrossEncoderEmbedder._cache[model_name] = TextCrossEncoder(model_name)
+            text_cross_encoder_cls = _load_text_cross_encoder_class()
+            CrossEncoderEmbedder._cache[model_name] = text_cross_encoder_cls(model_name)
         self._model = CrossEncoderEmbedder._cache[model_name]
 
     def rerank(self, query: str, documents: list[str]) -> list[float]:

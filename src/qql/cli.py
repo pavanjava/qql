@@ -43,6 +43,8 @@ Available statements:
       Optional: [yellow]USING HYBRID[/yellow] [DENSE MODEL '<model>'] [SPARSE MODEL '<model>']
       Optional: [yellow]WHERE[/yellow] <filter>   (e.g. WHERE year > 2020 AND status = 'ok')
       Optional: [yellow]RERANK[/yellow] [MODEL '<model>']   rerank results with a cross-encoder
+      Optional: [yellow]EXACT[/yellow]   bypass HNSW and perform exact search
+      Optional: [yellow]WITH[/yellow] { hnsw_ef: <int>, exact: <bool>, acorn: <bool> }   search parameters
 
   [yellow]DELETE FROM[/yellow] <name> [yellow]WHERE id =[/yellow] '<id>'
       Delete a point by its ID.

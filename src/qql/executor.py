@@ -308,9 +308,11 @@ class Executor:
         vector = embedder.embed(node.query_text)
 
         try:
+            query_using = self._get_dense_vector_name(node.collection)
             response = self._client.query_points(
                 collection_name=node.collection,
                 query=vector,
+                using=query_using,
                 limit=fetch_limit,
                 query_filter=qdrant_filter,
                 search_params=search_params,
@@ -345,6 +347,18 @@ class Executor:
             exact=with_clause.exact,
             acorn=AcornSearchParams(enable=True) if with_clause.acorn else None,
         )
+
+    def _get_dense_vector_name(self, collection_name: str) -> str | None:
+        """Return the dense vector name for named-vector collections.
+
+        Dense-only QQL searches should keep working against hybrid collections,
+        which store vectors under the explicit ``dense`` name.
+        """
+        info = self._client.get_collection(collection_name)
+        vectors = info.config.params.vectors  # type: ignore[union-attr]
+        if isinstance(vectors, dict):
+            return "dense"
+        return None
 
     def _apply_reranking(
         self,
