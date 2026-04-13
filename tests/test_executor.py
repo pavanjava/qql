@@ -678,3 +678,180 @@ class TestEnsureCollectionHybridCompat:
         )
         with pytest.raises(QQLRuntimeError, match="dimension mismatch"):
             executor._ensure_collection("col", 384)
+
+
+FAKE_SPARSE = {"indices": [1, 42, 100], "values": [0.22, 0.8, 0.3]}
+
+
+class TestRerankSearch:
+    @pytest.fixture
+    def mock_cross_encoder(self, mocker):
+        mock = mocker.MagicMock()
+        mock.rerank.return_value = [0.9, 0.3, 0.7]
+        mocker.patch("qql.executor.CrossEncoderEmbedder", return_value=mock)
+        return mock
+
+    def _make_point(self, mocker, id_, score, text):
+        p = mocker.MagicMock()
+        p.id = id_
+        p.score = score
+        p.payload = {"text": text}
+        return p
+
+    def test_rerank_calls_cross_encoder_with_query_and_texts(
+        self, executor, mock_client, mock_cross_encoder, mocker
+    ):
+        mock_client.collection_exists.return_value = True
+        pts = [
+            self._make_point(mocker, "a", 0.9, "doc A"),
+            self._make_point(mocker, "b", 0.5, "doc B"),
+            self._make_point(mocker, "c", 0.7, "doc C"),
+        ]
+        mock_resp = mocker.MagicMock()
+        mock_resp.points = pts
+        mock_client.query_points.return_value = mock_resp
+
+        node = SearchStmt(
+            collection="col", query_text="my query", limit=3, model=None, rerank=True
+        )
+        executor.execute(node)
+        mock_cross_encoder.rerank.assert_called_once_with(
+            "my query", ["doc A", "doc B", "doc C"]
+        )
+
+    def test_rerank_qdrant_fetches_multiplied_limit(
+        self, executor, mock_client, mock_cross_encoder, mocker
+    ):
+        mock_client.collection_exists.return_value = True
+        mock_resp = mocker.MagicMock()
+        mock_resp.points = []
+        mock_client.query_points.return_value = mock_resp
+
+        node = SearchStmt(
+            collection="col", query_text="q", limit=5, model=None, rerank=True
+        )
+        executor.execute(node)
+        kw = mock_client.query_points.call_args.kwargs
+        assert kw["limit"] == 5 * 4  # _RERANK_FETCH_MULTIPLIER
+
+    def test_rerank_results_sorted_by_cross_encoder_score(
+        self, executor, mock_client, mock_cross_encoder, mocker
+    ):
+        mock_client.collection_exists.return_value = True
+        pts = [
+            self._make_point(mocker, "a", 0.9, "doc A"),
+            self._make_point(mocker, "b", 0.5, "doc B"),
+            self._make_point(mocker, "c", 0.7, "doc C"),
+        ]
+        mock_resp = mocker.MagicMock()
+        mock_resp.points = pts
+        mock_client.query_points.return_value = mock_resp
+        # scores: A→0.9, B→0.3, C→0.7  → sorted order: A, C, B
+        mock_cross_encoder.rerank.return_value = [0.9, 0.3, 0.7]
+
+        node = SearchStmt(
+            collection="col", query_text="q", limit=3, model=None, rerank=True
+        )
+        result = executor.execute(node)
+        ids = [r["id"] for r in result.data]
+        assert ids == ["a", "c", "b"]
+
+    def test_rerank_slices_to_limit(
+        self, executor, mock_client, mock_cross_encoder, mocker
+    ):
+        mock_client.collection_exists.return_value = True
+        pts = [self._make_point(mocker, str(i), 0.5, f"doc {i}") for i in range(8)]
+        mock_resp = mocker.MagicMock()
+        mock_resp.points = pts
+        mock_client.query_points.return_value = mock_resp
+        mock_cross_encoder.rerank.return_value = [float(i) for i in range(8)]
+
+        node = SearchStmt(
+            collection="col", query_text="q", limit=3, model=None, rerank=True
+        )
+        result = executor.execute(node)
+        assert len(result.data) == 3
+
+    def test_rerank_message_contains_reranked(
+        self, executor, mock_client, mock_cross_encoder, mocker
+    ):
+        mock_client.collection_exists.return_value = True
+        mock_resp = mocker.MagicMock()
+        mock_resp.points = []
+        mock_client.query_points.return_value = mock_resp
+        mock_cross_encoder.rerank.return_value = []
+
+        node = SearchStmt(
+            collection="col", query_text="q", limit=5, model=None, rerank=True
+        )
+        result = executor.execute(node)
+        assert "reranked" in result.message
+
+    def test_no_rerank_does_not_call_cross_encoder(
+        self, executor, mock_client, mock_cross_encoder, mocker
+    ):
+        mock_client.collection_exists.return_value = True
+        mock_resp = mocker.MagicMock()
+        mock_resp.points = []
+        mock_client.query_points.return_value = mock_resp
+
+        node = SearchStmt(
+            collection="col", query_text="q", limit=5, model=None, rerank=False
+        )
+        executor.execute(node)
+        mock_cross_encoder.rerank.assert_not_called()
+
+    def test_no_rerank_uses_original_limit(
+        self, executor, mock_client, mock_cross_encoder, mocker
+    ):
+        mock_client.collection_exists.return_value = True
+        mock_resp = mocker.MagicMock()
+        mock_resp.points = []
+        mock_client.query_points.return_value = mock_resp
+
+        node = SearchStmt(
+            collection="col", query_text="q", limit=5, model=None, rerank=False
+        )
+        executor.execute(node)
+        kw = mock_client.query_points.call_args.kwargs
+        assert kw["limit"] == 5
+
+    def test_rerank_custom_model_forwarded(
+        self, executor, mock_client, mocker
+    ):
+        mock_client.collection_exists.return_value = True
+        mock_resp = mocker.MagicMock()
+        mock_resp.points = []
+        mock_client.query_points.return_value = mock_resp
+
+        mock_ce = mocker.MagicMock()
+        mock_ce.rerank.return_value = []
+        ce_cls = mocker.patch("qql.executor.CrossEncoderEmbedder", return_value=mock_ce)
+
+        node = SearchStmt(
+            collection="col", query_text="q", limit=5, model=None,
+            rerank=True, rerank_model="my-custom/reranker",
+        )
+        executor.execute(node)
+        ce_cls.assert_called_once_with("my-custom/reranker")
+
+    def test_rerank_hybrid_search_message(
+        self, executor, mock_client, mock_cross_encoder, mocker
+    ):
+        mock_client.collection_exists.return_value = True
+        mock_resp = mocker.MagicMock()
+        mock_resp.points = []
+        mock_client.query_points.return_value = mock_resp
+        mock_cross_encoder.rerank.return_value = []
+
+        mock_sparse = mocker.MagicMock()
+        mock_sparse.query_embed.return_value = FAKE_SPARSE
+        mocker.patch("qql.executor.SparseEmbedder", return_value=mock_sparse)
+
+        node = SearchStmt(
+            collection="col", query_text="q", limit=5, model=None,
+            hybrid=True, rerank=True,
+        )
+        result = executor.execute(node)
+        assert "hybrid" in result.message
+        assert "reranked" in result.message

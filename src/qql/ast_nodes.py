@@ -146,6 +146,8 @@ class SearchStmt:
     hybrid: bool = False            # if True, use prefetch+RRF hybrid search
     sparse_model: str | None = None # sparse model for hybrid; None → SparseEmbedder.DEFAULT_MODEL
     query_filter: FilterExpr | None = None  # optional WHERE clause; default keeps existing tests valid
+    rerank: bool = False                    # if True, apply cross-encoder reranking post-Qdrant
+    rerank_model: str | None = None         # cross-encoder model; None → CrossEncoderEmbedder.DEFAULT_MODEL
 
 
 @dataclass(frozen=True)

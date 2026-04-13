@@ -154,6 +154,14 @@ class Parser:
         if self._peek().kind == TokenKind.WHERE:
             self._advance()  # consume WHERE
             query_filter = self._parse_filter_expr()
+        rerank: bool = False
+        rerank_model: str | None = None
+        if self._peek().kind == TokenKind.RERANK:
+            self._advance()  # consume RERANK
+            rerank = True
+            if self._peek().kind == TokenKind.MODEL:
+                self._advance()  # consume MODEL
+                rerank_model = self._expect(TokenKind.STRING).value
         return SearchStmt(
             collection=collection,
             query_text=query_text,
@@ -162,6 +170,8 @@ class Parser:
             hybrid=hybrid,
             sparse_model=sparse_model,
             query_filter=query_filter,
+            rerank=rerank,
+            rerank_model=rerank_model,
         )
 
     def _parse_delete(self) -> DeleteStmt:

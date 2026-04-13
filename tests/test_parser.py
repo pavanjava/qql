@@ -477,3 +477,62 @@ class TestHybridSearch:
     def test_search_hybrid_limit_preserved(self):
         node = parse("SEARCH col SIMILAR TO 'q' LIMIT 7 USING HYBRID")
         assert node.limit == 7
+
+
+class TestRerankSearch:
+    def test_rerank_flag_set(self):
+        node = parse("SEARCH col SIMILAR TO 'q' LIMIT 5 RERANK")
+        assert node.rerank is True
+        assert node.rerank_model is None
+
+    def test_rerank_with_model(self):
+        node = parse(
+            "SEARCH col SIMILAR TO 'q' LIMIT 5 RERANK MODEL 'cross-encoder/ms-marco-MiniLM-L-6-v2'"
+        )
+        assert node.rerank is True
+        assert node.rerank_model == "cross-encoder/ms-marco-MiniLM-L-6-v2"
+
+    def test_rerank_default_false(self):
+        node = parse("SEARCH col SIMILAR TO 'q' LIMIT 5")
+        assert node.rerank is False
+        assert node.rerank_model is None
+
+    def test_rerank_with_using_model(self):
+        node = parse("SEARCH col SIMILAR TO 'q' LIMIT 5 USING MODEL 'BAAI/bge-small-en-v1.5' RERANK")
+        assert node.model == "BAAI/bge-small-en-v1.5"
+        assert node.rerank is True
+
+    def test_rerank_with_hybrid(self):
+        node = parse("SEARCH col SIMILAR TO 'q' LIMIT 5 USING HYBRID RERANK")
+        assert node.hybrid is True
+        assert node.rerank is True
+        assert node.rerank_model is None
+
+    def test_rerank_with_where(self):
+        node = parse("SEARCH col SIMILAR TO 'q' LIMIT 5 WHERE year > 2020 RERANK")
+        assert node.query_filter is not None
+        assert node.rerank is True
+
+    def test_rerank_with_hybrid_where_and_model(self):
+        node = parse(
+            "SEARCH col SIMILAR TO 'q' LIMIT 5 USING HYBRID WHERE year > 2020 "
+            "RERANK MODEL 'cross-encoder/ms-marco-MiniLM-L-6-v2'"
+        )
+        assert node.hybrid is True
+        assert node.query_filter is not None
+        assert node.rerank is True
+        assert node.rerank_model == "cross-encoder/ms-marco-MiniLM-L-6-v2"
+
+    def test_rerank_lowercase(self):
+        node = parse("SEARCH col SIMILAR TO 'q' LIMIT 5 rerank")
+        assert node.rerank is True
+
+    def test_rerank_model_custom(self):
+        node = parse("SEARCH col SIMILAR TO 'q' LIMIT 5 RERANK MODEL 'my-custom/reranker'")
+        assert node.rerank_model == "my-custom/reranker"
+
+    def test_existing_search_unaffected_by_rerank_addition(self):
+        """Existing parse calls without RERANK still produce rerank=False."""
+        node = parse("SEARCH col SIMILAR TO 'q' LIMIT 10 USING MODEL 'BAAI/bge-small-en-v1.5'")
+        assert node.rerank is False
+        assert node.rerank_model is None

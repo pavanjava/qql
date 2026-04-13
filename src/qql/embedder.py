@@ -65,3 +65,34 @@ class SparseEmbedder:
         """Embed a query string (BM25 applies different IDF weighting at query time)."""
         result = next(iter(self._model.query_embed(text)))  # type: ignore[attr-defined]
         return {"indices": result.indices.tolist(), "values": result.values.tolist()}
+
+
+class CrossEncoderEmbedder:
+    """Cross-encoder reranker using fastembed.TextCrossEncoder.
+
+    Jointly encodes (query, document) pairs to produce relevance scores.
+    Higher score = more relevant. No new package dependencies —
+    TextCrossEncoder is included in the fastembed package bundled with
+    qdrant-client[fastembed].
+    """
+
+    DEFAULT_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+
+    # Class-level cache mirrors Embedder's pattern
+    _cache: dict[str, object] = {}
+
+    def __init__(self, model_name: str = DEFAULT_MODEL) -> None:
+        self._model_name = model_name
+        if model_name not in CrossEncoderEmbedder._cache:
+            from fastembed import TextCrossEncoder
+
+            CrossEncoderEmbedder._cache[model_name] = TextCrossEncoder(model_name)
+        self._model = CrossEncoderEmbedder._cache[model_name]
+
+    def rerank(self, query: str, documents: list[str]) -> list[float]:
+        """Return a relevance score for each (query, document) pair.
+
+        Scores are raw logits — higher means more relevant.
+        The returned list is the same length as ``documents`` and in the same order.
+        """
+        return list(self._model.rerank(query, documents))  # type: ignore[attr-defined]
