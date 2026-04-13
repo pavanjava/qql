@@ -7,6 +7,7 @@ from typing import Any
 from qdrant_client import QdrantClient
 from qdrant_client.http.exceptions import UnexpectedResponse
 from qdrant_client.models import (
+    AcornSearchParams,
     Distance,
     FieldCondition,
     Filter,
@@ -25,6 +26,7 @@ from qdrant_client.models import (
     PointStruct,
     Prefetch,
     Range,
+    SearchParams,
     SparseVector,
     SparseVectorParams,
     VectorParams,
@@ -52,6 +54,7 @@ from .ast_nodes import (
     NotInExpr,
     OrExpr,
     SearchStmt,
+    SearchWith,
     ShowCollectionsStmt,
 )
 from .config import QQLConfig
@@ -236,6 +239,8 @@ class Executor:
                 self._build_qdrant_filter(node.query_filter)
             )
 
+        search_params = self._build_search_params(node.with_clause)
+
         # When reranking is requested, fetch more candidates so the reranker has
         # enough material to reorder; only `node.limit` results are returned.
         fetch_limit = node.limit * _RERANK_FETCH_MULTIPLIER if node.rerank else node.limit
@@ -262,11 +267,13 @@ class Executor:
                             query=dense_vector,
                             using="dense",
                             limit=node.limit * 4,
+                            params=search_params,
                         ),
                         Prefetch(
                             query=sparse_vector,
                             using="sparse",
                             limit=node.limit * 4,
+                            params=search_params,
                         ),
                     ],
                     query=FusionQuery(fusion=Fusion.RRF),
@@ -306,6 +313,7 @@ class Executor:
                 query=vector,
                 limit=fetch_limit,
                 query_filter=qdrant_filter,
+                search_params=search_params,
             )
         except UnexpectedResponse as e:
             raise QQLRuntimeError(f"Qdrant error during SEARCH: {e}") from e
@@ -327,6 +335,15 @@ class Executor:
             success=True,
             message=f"Found {len(results)} result(s)",
             data=results,
+        )
+
+    def _build_search_params(self, with_clause: SearchWith | None) -> SearchParams | None:
+        if with_clause is None:
+            return None
+        return SearchParams(
+            hnsw_ef=with_clause.hnsw_ef,
+            exact=with_clause.exact,
+            acorn=AcornSearchParams(enable=True) if with_clause.acorn else None,
         )
 
     def _apply_reranking(

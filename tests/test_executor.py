@@ -6,6 +6,7 @@ from qql.ast_nodes import (
     DropCollectionStmt,
     InsertStmt,
     SearchStmt,
+    SearchWith,
     ShowCollectionsStmt,
 )
 from qql.config import QQLConfig
@@ -151,6 +152,47 @@ class TestSearch:
         node = SearchStmt(collection="ghost", query_text="hi", limit=3, model=None)
         with pytest.raises(QQLRuntimeError, match="does not exist"):
             executor.execute(node)
+
+    def test_search_with_exact_forwards_search_params(
+        self, executor, mock_client, mocker
+    ):
+        mock_client.collection_exists.return_value = True
+        mock_response = mocker.MagicMock()
+        mock_response.points = []
+        mock_client.query_points.return_value = mock_response
+
+        node = SearchStmt(
+            collection="notes",
+            query_text="hello",
+            limit=5,
+            model=None,
+            with_clause=SearchWith(exact=True),
+        )
+        executor.execute(node)
+
+        search_params = mock_client.query_points.call_args.kwargs["search_params"]
+        assert search_params.exact is True
+
+    def test_search_with_acorn_forwards_search_params(
+        self, executor, mock_client, mocker
+    ):
+        mock_client.collection_exists.return_value = True
+        mock_response = mocker.MagicMock()
+        mock_response.points = []
+        mock_client.query_points.return_value = mock_response
+
+        node = SearchStmt(
+            collection="notes",
+            query_text="hello",
+            limit=5,
+            model=None,
+            with_clause=SearchWith(hnsw_ef=128, acorn=True),
+        )
+        executor.execute(node)
+
+        search_params = mock_client.query_points.call_args.kwargs["search_params"]
+        assert search_params.hnsw_ef == 128
+        assert search_params.acorn.enable is True
 
 
 class TestDelete:
@@ -592,6 +634,29 @@ class TestHybridSearch:
         prefetches = mock_client.query_points.call_args.kwargs["prefetch"]
         usings = {p.using for p in prefetches}
         assert usings == {"dense", "sparse"}
+
+    def test_hybrid_search_forwards_search_params_to_prefetch(
+        self, executor, mock_client, mock_sparse_embedder, mocker
+    ):
+        mock_client.collection_exists.return_value = True
+        mock_resp = mocker.MagicMock()
+        mock_resp.points = []
+        mock_client.query_points.return_value = mock_resp
+
+        node = SearchStmt(
+            collection="col",
+            query_text="q",
+            limit=5,
+            model=None,
+            hybrid=True,
+            with_clause=SearchWith(exact=True, hnsw_ef=64),
+        )
+        executor.execute(node)
+
+        prefetches = mock_client.query_points.call_args.kwargs["prefetch"]
+        assert all(p.params is not None for p in prefetches)
+        assert all(p.params.exact is True for p in prefetches)
+        assert all(p.params.hnsw_ef == 64 for p in prefetches)
 
     def test_hybrid_search_with_where_filter(
         self, executor, mock_client, mock_sparse_embedder, mocker

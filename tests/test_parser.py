@@ -20,6 +20,7 @@ from qql.ast_nodes import (
     NotInExpr,
     OrExpr,
     SearchStmt,
+    SearchWith,
     ShowCollectionsStmt,
 )
 from qql.exceptions import QQLSyntaxError
@@ -536,3 +537,82 @@ class TestRerankSearch:
         node = parse("SEARCH col SIMILAR TO 'q' LIMIT 10 USING MODEL 'BAAI/bge-small-en-v1.5'")
         assert node.rerank is False
         assert node.rerank_model is None
+
+
+class TestExactSearch:
+    def test_exact_keyword_sets_flag(self):
+        node = parse("SEARCH col SIMILAR TO 'q' LIMIT 5 EXACT")
+        assert node.with_clause is not None
+
+    def test_exact_with_where(self):
+        node = parse("SEARCH col SIMILAR TO 'q' LIMIT 5 EXACT WHERE year > 2020")
+        assert node.with_clause is not None
+        assert node.query_filter is not None
+
+    def test_exact_with_hybrid(self):
+        node = parse("SEARCH col SIMILAR TO 'q' LIMIT 5 USING HYBRID EXACT")
+        assert node.hybrid is True
+        assert node.with_clause is not None
+
+
+class TestSearchWithClause:
+    def test_with_hnsw_ef(self):
+        node = parse("SEARCH col SIMILAR TO 'q' LIMIT 5 WITH { hnsw_ef: 256 }")
+        assert node.with_clause is not None
+        assert node.with_clause.hnsw_ef == 256
+
+    def test_with_exact_true(self):
+        node = parse("SEARCH col SIMILAR TO 'q' LIMIT 5 WITH { exact: true }")
+        assert node.with_clause is not None
+        assert node.with_clause.exact is True
+
+    def test_with_exact_false(self):
+        node = parse("SEARCH col SIMILAR TO 'q' LIMIT 5 WITH { exact: false }")
+        assert node.with_clause is not None
+        assert node.with_clause.exact is False
+
+    def test_with_acorn(self):
+        node = parse("SEARCH col SIMILAR TO 'q' LIMIT 5 WITH { acorn: true }")
+        assert node.with_clause is not None
+        assert node.with_clause.acorn is True
+
+    def test_with_multiple_params(self):
+        node = parse(
+            "SEARCH col SIMILAR TO 'q' LIMIT 5 WITH { hnsw_ef: 256, acorn: true }"
+        )
+        assert node.with_clause.hnsw_ef == 256
+        assert node.with_clause.acorn is True
+
+    def test_with_after_where(self):
+        node = parse(
+            "SEARCH col SIMILAR TO 'q' LIMIT 5 WHERE year > 2020 WITH { hnsw_ef: 128 }"
+        )
+        assert node.with_clause is not None
+        assert node.with_clause.hnsw_ef == 128
+        assert node.query_filter is not None
+
+    def test_with_after_rerank(self):
+        node = parse("SEARCH col SIMILAR TO 'q' LIMIT 5 RERANK WITH { hnsw_ef: 256 }")
+        assert node.rerank is True
+        assert node.with_clause is not None
+        assert node.with_clause.hnsw_ef == 256
+
+    def test_with_full_search(self):
+        node = parse(
+            "SEARCH col SIMILAR TO 'q' LIMIT 5 USING HYBRID WHERE year > 2020 "
+            "RERANK WITH { hnsw_ef: 256, acorn: true }"
+        )
+        assert node.hybrid is True
+        assert node.query_filter is not None
+        assert node.rerank is True
+        assert node.with_clause is not None
+        assert node.with_clause.hnsw_ef == 256
+        assert node.with_clause.acorn is True
+
+    def test_with_unknown_keyword_raises(self):
+        with pytest.raises(QQLSyntaxError):
+            parse("SEARCH col SIMILAR TO 'q' LIMIT 5 WITH { diversity: 0.5 }")
+
+    def test_with_trailing_comma(self):
+        node = parse("SEARCH col SIMILAR TO 'q' LIMIT 5 WITH { hnsw_ef: 256, }")
+        assert node.with_clause.hnsw_ef == 256

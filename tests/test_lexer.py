@@ -253,3 +253,17 @@ class TestRerankKeyword:
         rerank_idx = ks.index(TokenKind.RERANK)
         assert ks[rerank_idx + 1] == TokenKind.MODEL
         assert ks[rerank_idx + 2] == TokenKind.STRING
+
+
+class TestSearchParamKeywords:
+    def test_exact_keyword(self):
+        ks = kinds("EXACT")
+        assert ks[0] == TokenKind.EXACT
+
+    def test_with_keyword(self):
+        ks = kinds("WITH")
+        assert ks[0] == TokenKind.WITH
+
+    def test_acorn_keyword(self):
+        ks = kinds("ACORN")
+        assert ks[0] == TokenKind.ACORN

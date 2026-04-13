@@ -22,6 +22,7 @@ from .ast_nodes import (
     NotInExpr,
     OrExpr,
     SearchStmt,
+    SearchWith,
     ShowCollectionsStmt,
 )
 from .exceptions import QQLSyntaxError
@@ -130,6 +131,12 @@ class Parser:
         query_text = self._expect(TokenKind.STRING).value
         self._expect(TokenKind.LIMIT)
         limit = int(self._expect(TokenKind.INTEGER).value)
+
+        with_clause: SearchWith | None = None
+        if self._peek().kind == TokenKind.EXACT:
+            self._advance()
+            with_clause = SearchWith(exact=True)
+
         model: str | None = None
         hybrid: bool = False
         sparse_model: str | None = None
@@ -162,6 +169,27 @@ class Parser:
             if self._peek().kind == TokenKind.MODEL:
                 self._advance()  # consume MODEL
                 rerank_model = self._expect(TokenKind.STRING).value
+        if self._peek().kind == TokenKind.EXACT:
+            self._advance()
+            if with_clause is None:
+                with_clause = SearchWith(exact=True)
+            else:
+                with_clause = SearchWith(
+                    hnsw_ef=with_clause.hnsw_ef,
+                    exact=True,
+                    acorn=with_clause.acorn,
+                )
+        if self._peek().kind == TokenKind.WITH:
+            self._advance()  # consume WITH
+            parsed_with = self._parse_with_clause()
+            if with_clause is None:
+                with_clause = parsed_with
+            else:
+                with_clause = SearchWith(
+                    hnsw_ef=parsed_with.hnsw_ef or with_clause.hnsw_ef,
+                    exact=parsed_with.exact or with_clause.exact,
+                    acorn=parsed_with.acorn or with_clause.acorn,
+                )
         return SearchStmt(
             collection=collection,
             query_text=query_text,
@@ -172,6 +200,7 @@ class Parser:
             query_filter=query_filter,
             rerank=rerank,
             rerank_model=rerank_model,
+            with_clause=with_clause,
         )
 
     def _parse_delete(self) -> DeleteStmt:
@@ -464,6 +493,62 @@ class Parser:
         if tok.kind == TokenKind.LBRACKET:
             return self._parse_list()
         raise QQLSyntaxError(f"Unexpected value token '{tok.value}'", tok.pos)
+
+    # ── WITH clause: { hnsw_ef: N, exact: true, acorn: true } ──
+
+    def _parse_with_clause(self) -> SearchWith:
+        self._expect(TokenKind.LBRACE)
+        hnsw_ef: int | None = None
+        exact: bool = False
+        acorn: bool = False
+        while self._peek().kind != TokenKind.RBRACE:
+            key_tok = self._peek()
+            if key_tok.kind not in (
+                TokenKind.IDENTIFIER,
+                TokenKind.EXACT,
+                TokenKind.ACORN,
+            ):
+                raise QQLSyntaxError(
+                    f"Expected a WITH parameter name, got '{key_tok.value}'",
+                    key_tok.pos,
+                )
+            self._advance()
+            key = key_tok.value.lower()
+            self._expect(TokenKind.COLON)
+            if key == "hnsw_ef":
+                hnsw_ef = int(self._expect(TokenKind.INTEGER).value)
+            elif key == "exact":
+                exact = self._parse_bool()
+            elif key == "acorn":
+                acorn = self._parse_bool()
+            else:
+                raise QQLSyntaxError(
+                    f"Unknown WITH parameter '{key}'. Expected: hnsw_ef, exact, acorn",
+                    key_tok.pos,
+                )
+            if self._peek().kind == TokenKind.COMMA:
+                self._advance()
+                if self._peek().kind == TokenKind.RBRACE:
+                    break
+            else:
+                break
+        self._expect(TokenKind.RBRACE)
+        return SearchWith(
+            hnsw_ef=hnsw_ef,
+            exact=exact,
+            acorn=acorn,
+        )
+
+    def _parse_bool(self) -> bool:
+        tok = self._peek()
+        if tok.kind == TokenKind.IDENTIFIER:
+            val = tok.value.upper()
+            self._advance()
+            if val == "TRUE":
+                return True
+            if val == "FALSE":
+                return False
+        raise QQLSyntaxError(f"Expected true or false, got '{tok.value}'", tok.pos)
 
     # ── Token stream helpers ──────────────────────────────────────────────
 
