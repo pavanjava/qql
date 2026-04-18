@@ -42,6 +42,7 @@ from .ast_nodes import (
     DropCollectionStmt,
     FilterExpr,
     InExpr,
+    InsertBulkStmt,
     InsertStmt,
     IsEmptyExpr,
     IsNotEmptyExpr,
@@ -77,6 +78,8 @@ class Executor:
         self._config = config
 
     def execute(self, node: ASTNode) -> ExecutionResult:
+        if isinstance(node, InsertBulkStmt):
+            return self._execute_insert_bulk(node)
         if isinstance(node, InsertStmt):
             return self._execute_insert(node)
         if isinstance(node, CreateCollectionStmt):
@@ -168,6 +171,84 @@ class Executor:
             success=True,
             message=f"Inserted 1 point [{point_id}]",
             data={"id": point_id, "collection": node.collection},
+        )
+
+    def _execute_insert_bulk(self, node: InsertBulkStmt) -> ExecutionResult:
+        if not node.values_list:
+            raise QQLRuntimeError("INSERT BULK VALUES list is empty")
+        for i, vals in enumerate(node.values_list):
+            if "text" not in vals:
+                raise QQLRuntimeError(
+                    f"INSERT BULK: item at index {i} is missing required 'text' field"
+                )
+
+        # ── Hybrid bulk INSERT: dense + sparse vectors ─────────────────────
+        if node.hybrid:
+            dense_model = node.model or self._config.default_model
+            sparse_model_name = node.sparse_model or SparseEmbedder.DEFAULT_MODEL
+            dense_embedder = Embedder(dense_model)
+            sparse_embedder = SparseEmbedder(sparse_model_name)
+
+            points: list[PointStruct] = []
+            for vals in node.values_list:
+                dense_vector = dense_embedder.embed(vals["text"])
+                sparse_obj = sparse_embedder.embed(vals["text"])
+                sparse_vector = SparseVector(
+                    indices=sparse_obj["indices"], values=sparse_obj["values"]
+                )
+                point_id = str(uuid.uuid4())
+                points.append(
+                    PointStruct(
+                        id=point_id,
+                        vector={"dense": dense_vector, "sparse": sparse_vector},
+                        payload=dict(vals),
+                    )
+                )
+
+            if not self._client.collection_exists(node.collection):
+                first_dense = dense_embedder.embed(node.values_list[0]["text"])
+                self._client.create_collection(
+                    collection_name=node.collection,
+                    vectors_config={
+                        "dense": VectorParams(size=len(first_dense), distance=Distance.COSINE)
+                    },
+                    sparse_vectors_config={
+                        "sparse": SparseVectorParams(modifier=Modifier.IDF)
+                    },
+                )
+
+            try:
+                self._client.upsert(collection_name=node.collection, points=points)
+            except UnexpectedResponse as e:
+                raise QQLRuntimeError(f"Qdrant error during INSERT BULK: {e}") from e
+
+            return ExecutionResult(
+                success=True,
+                message=f"Inserted {len(points)} points (hybrid)",
+            )
+
+        # ── Standard dense-only bulk INSERT ───────────────────────────────
+        model_name = node.model or self._config.default_model
+        embedder = Embedder(model_name)
+
+        points = []
+        for vals in node.values_list:
+            vector = embedder.embed(vals["text"])
+            point_id = str(uuid.uuid4())
+            points.append(
+                PointStruct(id=point_id, vector=vector, payload=dict(vals))
+            )
+
+        self._ensure_collection(node.collection, len(points[0].vector))
+
+        try:
+            self._client.upsert(collection_name=node.collection, points=points)
+        except UnexpectedResponse as e:
+            raise QQLRuntimeError(f"Qdrant error during INSERT BULK: {e}") from e
+
+        return ExecutionResult(
+            success=True,
+            message=f"Inserted {len(points)} points",
         )
 
     def _execute_create(self, node: CreateCollectionStmt) -> ExecutionResult:

@@ -8,6 +8,7 @@ from qql.ast_nodes import (
     DeleteStmt,
     DropCollectionStmt,
     InExpr,
+    InsertBulkStmt,
     InsertStmt,
     IsEmptyExpr,
     IsNotEmptyExpr,
@@ -86,6 +87,75 @@ class TestInsert:
         node = parse("INSERT INTO COLLECTION col VALUES {'author': 'bob'}")
         assert isinstance(node, InsertStmt)
         assert "text" not in node.values
+
+
+class TestInsertBulk:
+    def test_basic_bulk_insert(self):
+        node = parse("INSERT BULK INTO COLLECTION col VALUES [{'text': 'hello'}]")
+        assert isinstance(node, InsertBulkStmt)
+        assert node.collection == "col"
+        assert len(node.values_list) == 1
+        assert node.values_list[0]["text"] == "hello"
+
+    def test_bulk_insert_two_items(self):
+        node = parse(
+            "INSERT BULK INTO COLLECTION col VALUES "
+            "[{'text': 'first'}, {'text': 'second'}]"
+        )
+        assert isinstance(node, InsertBulkStmt)
+        assert len(node.values_list) == 2
+        assert node.values_list[1]["text"] == "second"
+
+    def test_bulk_insert_preserves_metadata(self):
+        node = parse(
+            "INSERT BULK INTO COLLECTION col VALUES "
+            "[{'text': 'hello', 'year': 2021}, {'text': 'world', 'year': 2022}]"
+        )
+        assert node.values_list[0]["year"] == 2021
+        assert node.values_list[1]["year"] == 2022
+
+    def test_bulk_insert_using_model(self):
+        node = parse(
+            "INSERT BULK INTO COLLECTION col VALUES [{'text': 'a'}] "
+            "USING MODEL 'BAAI/bge-base-en-v1.5'"
+        )
+        assert node.model == "BAAI/bge-base-en-v1.5"
+        assert node.hybrid is False
+
+    def test_bulk_insert_using_hybrid(self):
+        node = parse(
+            "INSERT BULK INTO COLLECTION col VALUES [{'text': 'a'}] USING HYBRID"
+        )
+        assert node.hybrid is True
+        assert node.model is None
+
+    def test_bulk_insert_using_hybrid_dense_model(self):
+        node = parse(
+            "INSERT BULK INTO COLLECTION col VALUES [{'text': 'a'}] "
+            "USING HYBRID DENSE MODEL 'BAAI/bge-base-en-v1.5'"
+        )
+        assert node.hybrid is True
+        assert node.model == "BAAI/bge-base-en-v1.5"
+
+    def test_bulk_insert_collection_name(self):
+        node = parse("INSERT BULK INTO COLLECTION my_notes VALUES [{'text': 'x'}]")
+        assert node.collection == "my_notes"
+
+    def test_bulk_insert_case_insensitive(self):
+        node = parse("insert bulk into collection col values [{'text': 'hi'}]")
+        assert isinstance(node, InsertBulkStmt)
+
+    def test_bulk_insert_default_model_is_none(self):
+        node = parse("INSERT BULK INTO COLLECTION col VALUES [{'text': 'a'}]")
+        assert node.model is None
+        assert node.sparse_model is None
+        assert node.hybrid is False
+
+    def test_single_insert_still_works_after_bulk_addition(self):
+        """Ensure single INSERT flow is not broken by the BULK branch."""
+        node = parse("INSERT INTO COLLECTION col VALUES {'text': 'hello'}")
+        assert isinstance(node, InsertStmt)
+        assert node.values == {"text": "hello"}
 
 
 class TestCreate:

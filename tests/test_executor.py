@@ -4,6 +4,7 @@ from qql.ast_nodes import (
     CreateCollectionStmt,
     DeleteStmt,
     DropCollectionStmt,
+    InsertBulkStmt,
     InsertStmt,
     SearchStmt,
     SearchWith,
@@ -89,6 +90,79 @@ class TestInsert:
         node = InsertStmt(collection="notes", values={"text": "hi"}, model=None)
         with pytest.raises(QQLRuntimeError, match="dimension mismatch"):
             executor.execute(node)
+
+
+class TestInsertBulk:
+    def test_bulk_insert_calls_upsert_once(self, executor, mock_client):
+        node = InsertBulkStmt(
+            collection="col",
+            values_list=({"text": "hello"}, {"text": "world"}),
+            model=None,
+        )
+        executor.execute(node)
+        mock_client.upsert.assert_called_once()
+
+    def test_bulk_insert_upserts_correct_count(self, executor, mock_client):
+        node = InsertBulkStmt(
+            collection="col",
+            values_list=({"text": "a"}, {"text": "b"}, {"text": "c"}),
+            model=None,
+        )
+        executor.execute(node)
+        call_args = mock_client.upsert.call_args.kwargs
+        assert len(call_args["points"]) == 3
+
+    def test_bulk_insert_creates_collection_when_missing(self, executor, mock_client):
+        node = InsertBulkStmt(
+            collection="col",
+            values_list=({"text": "hello"},),
+            model=None,
+        )
+        executor.execute(node)
+        mock_client.create_collection.assert_called_once()
+
+    def test_bulk_insert_skips_create_when_exists(self, executor, mock_client):
+        mock_client.collection_exists.return_value = True
+        mock_client.get_collection.return_value.config.params.vectors.size = 384
+        node = InsertBulkStmt(
+            collection="col",
+            values_list=({"text": "hello"},),
+            model=None,
+        )
+        executor.execute(node)
+        mock_client.create_collection.assert_not_called()
+
+    def test_bulk_insert_raises_on_missing_text(self, executor):
+        node = InsertBulkStmt(
+            collection="col",
+            values_list=({"text": "ok"}, {"author": "bob"}),
+            model=None,
+        )
+        with pytest.raises(QQLRuntimeError, match="index 1"):
+            executor.execute(node)
+
+    def test_bulk_insert_empty_list_raises(self, executor):
+        node = InsertBulkStmt(collection="col", values_list=(), model=None)
+        with pytest.raises(QQLRuntimeError, match="empty"):
+            executor.execute(node)
+
+    def test_bulk_insert_result_message_contains_count(self, executor, mock_client):
+        node = InsertBulkStmt(
+            collection="col",
+            values_list=({"text": "a"}, {"text": "b"}),
+            model=None,
+        )
+        result = executor.execute(node)
+        assert result.success is True
+        assert "2" in result.message
+        assert "points" in result.message
+
+    def test_single_insert_unaffected_by_bulk_dispatch(self, executor, mock_client):
+        """Ensure single INSERT still routes correctly after bulk dispatch added."""
+        node = InsertStmt(collection="notes", values={"text": "hello"}, model=None)
+        result = executor.execute(node)
+        assert result.success is True
+        assert "Inserted 1 point" in result.message
 
 
 class TestCreate:
