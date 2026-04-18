@@ -16,6 +16,9 @@ class TokenKind(Enum):
     DENSE = auto()
     SPARSE = auto()
     RERANK = auto()
+    EXACT = auto()
+    WITH = auto()
+    ACORN = auto()
     CREATE = auto()
     DROP = auto()
     SHOW = auto()
@@ -56,11 +59,11 @@ class TokenKind(Enum):
     COMMA = auto()
     EQUALS = auto()
     # ── Comparison operators ──────────────────────────────────────────────
-    NOT_EQUALS = auto()   # !=
-    GT = auto()           # >
-    GTE = auto()          # >=
-    LT = auto()           # <
-    LTE = auto()          # <=
+    NOT_EQUALS = auto()  # !=
+    GT = auto()  # >
+    GTE = auto()  # >=
+    LT = auto()  # <
+    LTE = auto()  # <=
     # ── Control ───────────────────────────────────────────────────────────
     EOF = auto()
 
@@ -77,6 +80,9 @@ _KEYWORDS: dict[str, TokenKind] = {
     "DENSE": TokenKind.DENSE,
     "SPARSE": TokenKind.SPARSE,
     "RERANK": TokenKind.RERANK,
+    "EXACT": TokenKind.EXACT,
+    "WITH": TokenKind.WITH,
+    "ACORN": TokenKind.ACORN,
     "CREATE": TokenKind.CREATE,
     "DROP": TokenKind.DROP,
     "SHOW": TokenKind.SHOW,

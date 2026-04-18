@@ -4,6 +4,14 @@ from dataclasses import dataclass
 from typing import Any, Union
 
 
+@dataclass(frozen=True)
+class SearchWith:
+    """Query-time search params supported by Qdrant SearchParams."""
+    hnsw_ef: int | None = None
+    exact: bool = False
+    acorn: bool = False
+
+
 # ── Filter expression leaf nodes ──────────────────────────────────────────────
 
 @dataclass(frozen=True)
@@ -148,7 +156,7 @@ class SearchStmt:
     query_filter: FilterExpr | None = None  # optional WHERE clause; default keeps existing tests valid
     rerank: bool = False                    # if True, apply cross-encoder reranking post-Qdrant
     rerank_model: str | None = None         # cross-encoder model; None → CrossEncoderEmbedder.DEFAULT_MODEL
-
+    with_clause: SearchWith | None = None
 
 @dataclass(frozen=True)
 class DeleteStmt:

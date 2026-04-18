@@ -36,6 +36,7 @@ qql> SEARCH notes SIMILAR TO 'vector databases' LIMIT 5 USING HYBRID RERANK
 - [All QQL Operations](#all-qql-operations)
   - [INSERT — add a point](#insert--add-a-point)
   - [SEARCH — find similar points](#search--find-similar-points)
+  - [Query-Time Search Params (`EXACT`, `WITH`)](#query-time-search-params-exact-with)
   - [WHERE Clause Filters](#where-clause-filters)
   - [Hybrid Search (USING HYBRID)](#hybrid-search-using-hybrid)
   - [Cross-Encoder Reranking (RERANK)](#cross-encoder-reranking-rerank)
@@ -251,6 +252,8 @@ SEARCH <collection_name> SIMILAR TO '<query_text>' LIMIT <n> USING MODEL '<model
 SEARCH <collection_name> SIMILAR TO '<query_text>' LIMIT <n> [USING MODEL '<model>'] WHERE <filter>
 SEARCH <collection_name> SIMILAR TO '<query_text>' LIMIT <n> USING HYBRID
 SEARCH <collection_name> SIMILAR TO '<query_text>' LIMIT <n> USING HYBRID [DENSE MODEL '<model>'] [SPARSE MODEL '<model>'] [WHERE <filter>]
+SEARCH <collection_name> SIMILAR TO '<query_text>' LIMIT <n> EXACT
+SEARCH <collection_name> SIMILAR TO '<query_text>' LIMIT <n> [USING ...] [WHERE <filter>] [RERANK] WITH { hnsw_ef: <n>, exact: true|false, acorn: true|false }
 SEARCH <collection_name> SIMILAR TO '<query_text>' LIMIT <n> [USING ...] [WHERE <filter>] RERANK [MODEL '<reranker_model>']
 ```
 
@@ -281,6 +284,16 @@ Hybrid search with a WHERE filter:
 SEARCH articles SIMILAR TO 'transformers' LIMIT 10 USING HYBRID WHERE year >= 2020
 ```
 
+Exact search for recall debugging:
+```sql
+SEARCH articles SIMILAR TO 'attention mechanism' LIMIT 10 EXACT
+```
+
+Search with query-time HNSW tuning:
+```sql
+SEARCH articles SIMILAR TO 'attention mechanism' LIMIT 10 WITH { hnsw_ef: 128 }
+```
+
 **Output:**
 
 Results are displayed as a table with three columns:
@@ -297,6 +310,47 @@ Results are displayed as a table with three columns:
 - **Payload** — all fields stored alongside the vector.
 
 **Important:** Use the same model for SEARCH as you used for INSERT. Mixing models produces meaningless scores because the vectors live in different spaces.
+
+---
+
+### Query-Time Search Params (`EXACT`, `WITH`)
+
+QQL supports a small set of Qdrant query-time search parameters on `SEARCH` statements.
+
+Use these when you want to debug retrieval quality or tune recall without changing collection-level settings.
+
+#### Supported options
+
+| Syntax | Effect |
+|---|---|
+| `EXACT` | Shorthand for exact KNN search (`exact=true`) |
+| `WITH { hnsw_ef: 128 }` | Increase HNSW exploration at query time |
+| `WITH { exact: true }` | Force exact KNN explicitly |
+| `WITH { acorn: true }` | Enable ACORN for filtered queries |
+
+#### Syntax notes
+
+- `EXACT` can appear after `LIMIT` or after `RERANK`
+- `WITH { ... }` can appear after `WHERE` and/or `RERANK`
+- Supported `WITH` keys are only `hnsw_ef`, `exact`, and `acorn`
+
+#### Examples
+
+```sql
+-- Exact KNN baseline
+SEARCH articles SIMILAR TO 'programming language' LIMIT 5 EXACT
+
+-- Raise HNSW ef at query time
+SEARCH articles SIMILAR TO 'transformers' LIMIT 10 WITH { hnsw_ef: 256 }
+
+-- Filtered search with ACORN
+SEARCH articles SIMILAR TO 'RAG' LIMIT 10 WHERE tag = 'li' WITH { acorn: true }
+
+-- Hybrid search with exact mode
+SEARCH articles SIMILAR TO 'attention' LIMIT 10 USING HYBRID EXACT
+```
+
+These options are passed through to Qdrant `SearchParams` during execution.
 
 ---
 
@@ -981,7 +1035,7 @@ Tests do not require a running Qdrant instance — the Qdrant client is mocked.
 pytest tests/ -v
 ```
 
-Expected output: **193 tests passing**.
+Expected output: **212 tests passing**.
 
 ---
 
