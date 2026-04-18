@@ -107,6 +107,70 @@ class TestCreate:
         assert "already exists" in result.message
 
 
+class TestCreateWithModel:
+    def test_create_with_model_passes_model_to_embedder(self, mock_client, cfg, mocker):
+        mock_emb = mocker.MagicMock()
+        mock_emb.dimensions = 768
+        embedder_cls = mocker.patch("qql.executor.Embedder", return_value=mock_emb)
+        executor = Executor(mock_client, cfg)
+        node = CreateCollectionStmt(collection="col", model="BAAI/bge-base-en-v1.5")
+        executor.execute(node)
+        embedder_cls.assert_called_once_with("BAAI/bge-base-en-v1.5")
+
+    def test_create_without_model_uses_default_model(self, mock_client, cfg, mocker):
+        mock_emb = mocker.MagicMock()
+        mock_emb.dimensions = 384
+        embedder_cls = mocker.patch("qql.executor.Embedder", return_value=mock_emb)
+        executor = Executor(mock_client, cfg)
+        node = CreateCollectionStmt(collection="col")
+        executor.execute(node)
+        embedder_cls.assert_called_once_with(cfg.default_model)
+
+    def test_create_hybrid_with_model_uses_named_vectors(self, mock_client, cfg, mocker):
+        mock_emb = mocker.MagicMock()
+        mock_emb.dimensions = 768
+        embedder_cls = mocker.patch("qql.executor.Embedder", return_value=mock_emb)
+        executor = Executor(mock_client, cfg)
+        node = CreateCollectionStmt(collection="col", hybrid=True, model="BAAI/bge-base-en-v1.5")
+        executor.execute(node)
+        embedder_cls.assert_called_once_with("BAAI/bge-base-en-v1.5")
+        kw = mock_client.create_collection.call_args.kwargs
+        assert isinstance(kw["vectors_config"], dict)
+        assert "dense" in kw["vectors_config"]
+        assert "sparse_vectors_config" in kw
+
+    def test_create_hybrid_without_model_uses_default(self, mock_client, cfg, mocker):
+        mock_emb = mocker.MagicMock()
+        mock_emb.dimensions = 384
+        embedder_cls = mocker.patch("qql.executor.Embedder", return_value=mock_emb)
+        executor = Executor(mock_client, cfg)
+        node = CreateCollectionStmt(collection="col", hybrid=True)
+        executor.execute(node)
+        embedder_cls.assert_called_once_with(cfg.default_model)
+        kw = mock_client.create_collection.call_args.kwargs
+        assert isinstance(kw["vectors_config"], dict)
+
+    def test_create_dense_with_model_uses_scalar_vectors(self, mock_client, cfg, mocker):
+        from qdrant_client.models import VectorParams
+        mock_emb = mocker.MagicMock()
+        mock_emb.dimensions = 768
+        mocker.patch("qql.executor.Embedder", return_value=mock_emb)
+        executor = Executor(mock_client, cfg)
+        node = CreateCollectionStmt(collection="col", model="BAAI/bge-base-en-v1.5")
+        executor.execute(node)
+        kw = mock_client.create_collection.call_args.kwargs
+        assert isinstance(kw["vectors_config"], VectorParams)
+        assert "sparse_vectors_config" not in kw
+
+    def test_create_existing_noop_with_model(self, executor, mock_client):
+        mock_client.collection_exists.return_value = True
+        node = CreateCollectionStmt(collection="col", model="some/model")
+        result = executor.execute(node)
+        mock_client.create_collection.assert_not_called()
+        assert result.success is True
+        assert "already exists" in result.message
+
+
 class TestDrop:
     def test_drop_existing_collection(self, executor, mock_client):
         mock_client.collection_exists.return_value = True
@@ -937,4 +1001,120 @@ class TestRerankSearch:
         )
         result = executor.execute(node)
         assert "hybrid" in result.message
+        assert "reranked" in result.message
+
+
+class TestSparseOnlySearch:
+    @pytest.fixture
+    def mock_sparse(self, mocker):
+        mock = mocker.MagicMock()
+        mock.query_embed.return_value = FAKE_SPARSE
+        mocker.patch("qql.executor.SparseEmbedder", return_value=mock)
+        return mock
+
+    def test_sparse_only_calls_query_embed(
+        self, executor, mock_client, mock_sparse, mocker
+    ):
+        mock_client.collection_exists.return_value = True
+        mock_resp = mocker.MagicMock()
+        mock_resp.points = []
+        mock_client.query_points.return_value = mock_resp
+
+        node = SearchStmt(
+            collection="col", query_text="q", limit=5, model=None,
+            sparse_only=True,
+        )
+        executor.execute(node)
+        mock_sparse.query_embed.assert_called_once_with("q")
+
+    def test_sparse_only_queries_sparse_vector_name(
+        self, executor, mock_client, mock_sparse, mocker
+    ):
+        mock_client.collection_exists.return_value = True
+        mock_resp = mocker.MagicMock()
+        mock_resp.points = []
+        mock_client.query_points.return_value = mock_resp
+
+        node = SearchStmt(
+            collection="col", query_text="q", limit=5, model=None,
+            sparse_only=True,
+        )
+        executor.execute(node)
+        kw = mock_client.query_points.call_args.kwargs
+        assert kw["using"] == "sparse"
+
+    def test_sparse_only_message_contains_sparse(
+        self, executor, mock_client, mock_sparse, mocker
+    ):
+        mock_client.collection_exists.return_value = True
+        mock_resp = mocker.MagicMock()
+        mock_resp.points = []
+        mock_client.query_points.return_value = mock_resp
+
+        node = SearchStmt(
+            collection="col", query_text="q", limit=5, model=None,
+            sparse_only=True,
+        )
+        result = executor.execute(node)
+        assert "sparse" in result.message
+
+    def test_sparse_only_uses_custom_model(
+        self, executor, mock_client, mocker
+    ):
+        mock_client.collection_exists.return_value = True
+        mock_resp = mocker.MagicMock()
+        mock_resp.points = []
+        mock_client.query_points.return_value = mock_resp
+
+        mock_sparse = mocker.MagicMock()
+        mock_sparse.query_embed.return_value = FAKE_SPARSE
+        sparse_cls = mocker.patch("qql.executor.SparseEmbedder", return_value=mock_sparse)
+
+        node = SearchStmt(
+            collection="col", query_text="q", limit=5, model=None,
+            sparse_only=True, sparse_model="prithivida/Splade_PP_en_v1",
+        )
+        executor.execute(node)
+        sparse_cls.assert_called_once_with("prithivida/Splade_PP_en_v1")
+
+    def test_sparse_only_uses_default_model_when_none(
+        self, executor, mock_client, mocker
+    ):
+        mock_client.collection_exists.return_value = True
+        mock_resp = mocker.MagicMock()
+        mock_resp.points = []
+        mock_client.query_points.return_value = mock_resp
+
+        mock_sparse = mocker.MagicMock()
+        mock_sparse.query_embed.return_value = FAKE_SPARSE
+        sparse_cls = mocker.patch("qql.executor.SparseEmbedder", return_value=mock_sparse)
+        # Make DEFAULT_MODEL on the mock class resolve to the real value so the
+        # executor's `node.sparse_model or SparseEmbedder.DEFAULT_MODEL` uses it.
+        sparse_cls.DEFAULT_MODEL = "Qdrant/bm25"
+
+        node = SearchStmt(
+            collection="col", query_text="q", limit=5, model=None,
+            sparse_only=True,
+        )
+        executor.execute(node)
+        sparse_cls.assert_called_once_with("Qdrant/bm25")
+
+    def test_sparse_only_with_rerank_message(
+        self, executor, mock_client, mock_sparse, mocker
+    ):
+        mock_client.collection_exists.return_value = True
+        mock_resp = mocker.MagicMock()
+        mock_resp.points = []
+        mock_client.query_points.return_value = mock_resp
+
+        mock_ce = mocker.MagicMock()
+        mock_ce.rerank.return_value = []
+        mocker.patch("qql.executor.CrossEncoderEmbedder", return_value=mock_ce)
+
+        node = SearchStmt(
+            collection="col", query_text="q", limit=5, model=None,
+            sparse_only=True, rerank=True,
+        )
+        result = executor.execute(node)
+        assert "sparse" in result.message
         assert "reranked" in result.message

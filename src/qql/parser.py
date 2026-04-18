@@ -107,10 +107,31 @@ class Parser:
         self._expect(TokenKind.COLLECTION)
         collection = self._parse_identifier()
         hybrid: bool = False
+        model: str | None = None
+
         if self._peek().kind == TokenKind.HYBRID:
+            # Bare HYBRID shorthand — backward compat
             self._advance()
             hybrid = True
-        return CreateCollectionStmt(collection=collection, hybrid=hybrid)
+        elif self._peek().kind == TokenKind.USING:
+            self._advance()  # consume USING
+            if self._peek().kind == TokenKind.HYBRID:
+                self._advance()  # consume HYBRID
+                hybrid = True
+                # Optional DENSE MODEL sub-clause
+                if self._peek().kind == TokenKind.DENSE:
+                    self._advance()  # consume DENSE
+                    self._expect(TokenKind.MODEL)
+                    model = self._expect(TokenKind.STRING).value
+            else:
+                self._expect(TokenKind.MODEL)
+                model = self._expect(TokenKind.STRING).value
+
+        return CreateCollectionStmt(
+            collection=collection,
+            hybrid=hybrid,
+            model=model,
+        )
 
     def _parse_drop(self) -> DropCollectionStmt:
         self._expect(TokenKind.DROP)
@@ -139,6 +160,7 @@ class Parser:
 
         model: str | None = None
         hybrid: bool = False
+        sparse_only: bool = False
         sparse_model: str | None = None
         if self._peek().kind == TokenKind.USING:
             self._advance()  # consume USING
@@ -154,6 +176,12 @@ class Parser:
                         model = m
                     else:
                         sparse_model = m
+            elif self._peek().kind == TokenKind.SPARSE:
+                self._advance()  # consume SPARSE
+                sparse_only = True
+                if self._peek().kind == TokenKind.MODEL:
+                    self._advance()  # consume MODEL
+                    sparse_model = self._expect(TokenKind.STRING).value
             else:
                 self._expect(TokenKind.MODEL)
                 model = self._expect(TokenKind.STRING).value
@@ -196,6 +224,7 @@ class Parser:
             limit=limit,
             model=model,
             hybrid=hybrid,
+            sparse_only=sparse_only,
             sparse_model=sparse_model,
             query_filter=query_filter,
             rerank=rerank,

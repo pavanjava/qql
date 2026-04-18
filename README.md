@@ -252,6 +252,7 @@ SEARCH <collection_name> SIMILAR TO '<query_text>' LIMIT <n> USING MODEL '<model
 SEARCH <collection_name> SIMILAR TO '<query_text>' LIMIT <n> [USING MODEL '<model>'] WHERE <filter>
 SEARCH <collection_name> SIMILAR TO '<query_text>' LIMIT <n> USING HYBRID
 SEARCH <collection_name> SIMILAR TO '<query_text>' LIMIT <n> USING HYBRID [DENSE MODEL '<model>'] [SPARSE MODEL '<model>'] [WHERE <filter>]
+SEARCH <collection_name> SIMILAR TO '<query_text>' LIMIT <n> USING SPARSE [MODEL '<sparse_model>']
 SEARCH <collection_name> SIMILAR TO '<query_text>' LIMIT <n> EXACT
 SEARCH <collection_name> SIMILAR TO '<query_text>' LIMIT <n> [USING ...] [WHERE <filter>] [RERANK] WITH { hnsw_ef: <n>, exact: true|false, acorn: true|false }
 SEARCH <collection_name> SIMILAR TO '<query_text>' LIMIT <n> [USING ...] [WHERE <filter>] RERANK [MODEL '<reranker_model>']
@@ -282,6 +283,16 @@ SEARCH articles SIMILAR TO 'attention mechanism' LIMIT 10 USING HYBRID
 Hybrid search with a WHERE filter:
 ```sql
 SEARCH articles SIMILAR TO 'transformers' LIMIT 10 USING HYBRID WHERE year >= 2020
+```
+
+Sparse-only search (queries only the `sparse` named vector — useful for pure keyword retrieval):
+```sql
+SEARCH medical_knowledge SIMILAR TO 'beta blocker contraindications' LIMIT 5 USING SPARSE
+```
+
+Sparse-only with a custom SPLADE model:
+```sql
+SEARCH medical_knowledge SIMILAR TO 'beta blocker contraindications' LIMIT 5 USING SPARSE MODEL 'prithivida/Splade_PP_en_v1'
 ```
 
 Exact search for recall debugging:
@@ -498,7 +509,12 @@ Hybrid search combines **dense semantic vectors** and **sparse BM25 keyword vect
 A hybrid collection stores both a named dense vector (`"dense"`) and a named sparse vector (`"sparse"`):
 
 ```sql
+-- Shorthand (backward compatible)
 CREATE COLLECTION articles HYBRID
+
+-- USING form — allows specifying a dense model
+CREATE COLLECTION articles USING HYBRID
+CREATE COLLECTION articles USING HYBRID DENSE MODEL 'BAAI/bge-base-en-v1.5'
 ```
 
 This is equivalent to calling Qdrant with:
@@ -695,21 +711,34 @@ Explicitly creates a new empty collection. Collections are also created automati
 ```
 CREATE COLLECTION <collection_name>
 CREATE COLLECTION <collection_name> HYBRID
+CREATE COLLECTION <collection_name> USING MODEL '<model_name>'
+CREATE COLLECTION <collection_name> USING HYBRID
+CREATE COLLECTION <collection_name> USING HYBRID DENSE MODEL '<model>'
 ```
 
 **Examples:**
 
-Dense-only collection (standard):
+Dense-only collection (standard, uses default model dimensions):
 ```sql
 CREATE COLLECTION research_papers
 ```
 
-Hybrid collection (dense + sparse BM25):
+Dense-only collection pinned to a specific model (768-dimensional):
+```sql
+CREATE COLLECTION research_papers USING MODEL 'BAAI/bge-base-en-v1.5'
+```
+
+Hybrid collection (dense + sparse BM25, default models):
 ```sql
 CREATE COLLECTION research_papers HYBRID
 ```
 
-The collection is created using the **default embedding model's dimensions** (384 for `all-MiniLM-L6-v2`) with **cosine distance**.
+Hybrid collection with a custom dense model:
+```sql
+CREATE COLLECTION research_papers USING HYBRID DENSE MODEL 'BAAI/bge-base-en-v1.5'
+```
+
+When `USING MODEL` is omitted, the collection uses the **default embedding model's dimensions** (384 for `all-MiniLM-L6-v2`). Specify `USING MODEL` to pin the collection to a specific model's output size — this must match the model you use in INSERT and SEARCH.
 
 If the collection already exists, the command succeeds with a message and does nothing.
 
