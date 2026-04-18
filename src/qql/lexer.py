@@ -7,6 +7,7 @@ from .exceptions import QQLSyntaxError
 class TokenKind(Enum):
     # ── Statement keywords ────────────────────────────────────────────────
     INSERT = auto()
+    BULK = auto()
     INTO = auto()
     COLLECTION = auto()
     VALUES = auto()
@@ -71,6 +72,7 @@ class TokenKind(Enum):
 _KEYWORDS: dict[str, TokenKind] = {
     # Statement keywords
     "INSERT": TokenKind.INSERT,
+    "BULK": TokenKind.BULK,
     "INTO": TokenKind.INTO,
     "COLLECTION": TokenKind.COLLECTION,
     "VALUES": TokenKind.VALUES,

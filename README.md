@@ -239,6 +239,56 @@ INSERT INTO COLLECTION articles VALUES {'text': 'hello world'}
 
 ---
 
+### INSERT BULK — batch insert multiple points
+
+Inserts multiple documents in a single statement. Each item in the array must contain a `"text"` key. All items are embedded and upserted to Qdrant in **one batched call**, which is significantly faster than issuing one `INSERT` per record.
+
+If the collection does not exist yet, it is **created automatically** on the first bulk insert.
+
+**Syntax:**
+```
+INSERT BULK INTO COLLECTION <collection_name> VALUES [<dict>, <dict>, ...]
+INSERT BULK INTO COLLECTION <collection_name> VALUES [<dict>, ...] USING MODEL '<model_name>'
+INSERT BULK INTO COLLECTION <collection_name> VALUES [<dict>, ...] USING HYBRID
+INSERT BULK INTO COLLECTION <collection_name> VALUES [<dict>, ...] USING HYBRID DENSE MODEL '<model>' SPARSE MODEL '<model>'
+```
+
+**Examples:**
+
+Minimal bulk insert (text only):
+```sql
+INSERT BULK INTO COLLECTION articles VALUES [
+  {'text': 'Qdrant supports cosine similarity search'},
+  {'text': 'Sparse BM25 vectors enable keyword retrieval'},
+  {'text': 'Hybrid search combines dense and sparse results via RRF'}
+]
+```
+
+Bulk insert with metadata:
+```sql
+INSERT BULK INTO COLLECTION articles VALUES [
+  {'text': 'Attention is all you need', 'author': 'vaswani', 'year': 2017},
+  {'text': 'BERT: Pre-training of deep bidirectional transformers', 'author': 'devlin', 'year': 2018},
+  {'text': 'Language models are few-shot learners', 'author': 'brown', 'year': 2020}
+]
+```
+
+Bulk insert into a hybrid collection:
+```sql
+INSERT BULK INTO COLLECTION articles VALUES [
+  {'text': 'Dense retrieval with FAISS', 'domain': 'ir'},
+  {'text': 'Sparse retrieval with BM25', 'domain': 'ir'}
+] USING HYBRID
+```
+
+**Rules:**
+- Every dict in the array must contain a `"text"` key. Missing `text` on any item raises an error with the offending index.
+- An empty array `[]` raises an error.
+- A UUID is auto-generated for each point — you do not provide IDs.
+- Supports all the same `USING` clauses as single `INSERT`.
+
+---
+
 ### SEARCH — find similar points
 
 Performs a **semantic similarity search**: your query text is embedded with the same model used during insert, then Qdrant finds the nearest vectors by cosine distance.

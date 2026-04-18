@@ -10,6 +10,7 @@ from .ast_nodes import (
     DropCollectionStmt,
     FilterExpr,
     InExpr,
+    InsertBulkStmt,
     InsertStmt,
     IsEmptyExpr,
     IsNotEmptyExpr,
@@ -70,8 +71,12 @@ class Parser:
 
     # ── Statement parsers ─────────────────────────────────────────────────
 
-    def _parse_insert(self) -> InsertStmt:
+    def _parse_insert(self) -> InsertStmt | InsertBulkStmt:
         self._expect(TokenKind.INSERT)
+        if self._peek().kind == TokenKind.BULK:
+            self._advance()  # consume BULK
+            return self._parse_insert_bulk_body()
+        # ── Standard single INSERT ────────────────────────────────────────
         self._expect(TokenKind.INTO)
         self._expect(TokenKind.COLLECTION)
         collection = self._parse_identifier()
@@ -100,6 +105,44 @@ class Parser:
         return InsertStmt(
             collection=collection, values=values, model=model,
             hybrid=hybrid, sparse_model=sparse_model,
+        )
+
+    def _parse_insert_bulk_body(self) -> InsertBulkStmt:
+        self._expect(TokenKind.INTO)
+        self._expect(TokenKind.COLLECTION)
+        collection = self._parse_identifier()
+        self._expect(TokenKind.VALUES)
+        raw_list = self._parse_list()
+        for i, item in enumerate(raw_list):
+            if not isinstance(item, dict):
+                raise QQLSyntaxError(
+                    f"INSERT BULK VALUES item at index {i} must be a dict, "
+                    f"got {type(item).__name__}",
+                    0,
+                )
+        values_list: tuple[dict, ...] = tuple(raw_list)
+        model: str | None = None
+        hybrid: bool = False
+        sparse_model: str | None = None
+        if self._peek().kind == TokenKind.USING:
+            self._advance()  # consume USING
+            if self._peek().kind == TokenKind.HYBRID:
+                self._advance()  # consume HYBRID
+                hybrid = True
+                while self._peek().kind in (TokenKind.DENSE, TokenKind.SPARSE):
+                    sub = self._advance()
+                    self._expect(TokenKind.MODEL)
+                    m = self._expect(TokenKind.STRING).value
+                    if sub.kind == TokenKind.DENSE:
+                        model = m
+                    else:
+                        sparse_model = m
+            else:
+                self._expect(TokenKind.MODEL)
+                model = self._expect(TokenKind.STRING).value
+        return InsertBulkStmt(
+            collection=collection, values_list=values_list,
+            model=model, hybrid=hybrid, sparse_model=sparse_model,
         )
 
     def _parse_create(self) -> CreateCollectionStmt:

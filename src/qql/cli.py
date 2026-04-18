@@ -28,6 +28,10 @@ Available statements:
       Optional: [yellow]USING MODEL[/yellow] '<model>'
       Optional: [yellow]USING HYBRID[/yellow] [DENSE MODEL '<model>'] [SPARSE MODEL '<model>']
 
+  [yellow]INSERT BULK INTO COLLECTION[/yellow] <name> [yellow]VALUES[/yellow] [{[yellow]'text'[/yellow]: '...', ...}, ...]
+      Batch insert multiple points in a single call. Each dict must contain 'text'.
+      Supports the same [yellow]USING[/yellow] clauses as INSERT.
+
   [yellow]CREATE COLLECTION[/yellow] <name> [[yellow]HYBRID[/yellow]]
       Create a new collection. Add HYBRID for dense+sparse BM25 vectors.
       Optional: [yellow]USING MODEL[/yellow] '<model>'

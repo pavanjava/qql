@@ -130,6 +130,15 @@ class InsertStmt:
 
 
 @dataclass(frozen=True)
+class InsertBulkStmt:
+    collection: str
+    values_list: tuple[dict[str, Any], ...]  # each dict must contain "text"
+    model: str | None                         # dense model; None → use config default
+    hybrid: bool = False
+    sparse_model: str | None = None
+
+
+@dataclass(frozen=True)
 class CreateCollectionStmt:
     collection: str
     hybrid: bool = False    # if True, create with dense + sparse named vectors
@@ -169,6 +178,7 @@ class DeleteStmt:
 # Union type for all top-level statement nodes
 ASTNode = (
     InsertStmt
+    | InsertBulkStmt
     | CreateCollectionStmt
     | DropCollectionStmt
     | ShowCollectionsStmt
