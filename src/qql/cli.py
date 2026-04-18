@@ -30,6 +30,8 @@ Available statements:
 
   [yellow]CREATE COLLECTION[/yellow] <name> [[yellow]HYBRID[/yellow]]
       Create a new collection. Add HYBRID for dense+sparse BM25 vectors.
+      Optional: [yellow]USING MODEL[/yellow] '<model>'
+      Optional: [yellow]USING HYBRID[/yellow] [DENSE MODEL '<model>']
 
   [yellow]DROP COLLECTION[/yellow] <name>
       Delete a collection and all its points.
@@ -41,6 +43,7 @@ Available statements:
       Semantic search by vector similarity.
       Optional: [yellow]USING MODEL[/yellow] '<model>'
       Optional: [yellow]USING HYBRID[/yellow] [DENSE MODEL '<model>'] [SPARSE MODEL '<model>']
+      Optional: [yellow]USING SPARSE[/yellow] [MODEL '<model>']   sparse-vector-only search
       Optional: [yellow]WHERE[/yellow] <filter>   (e.g. WHERE year > 2020 AND status = 'ok')
       Optional: [yellow]RERANK[/yellow] [MODEL '<model>']   rerank results with a cross-encoder
       Optional: [yellow]EXACT[/yellow]   bypass HNSW and perform exact search

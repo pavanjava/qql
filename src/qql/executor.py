@@ -177,9 +177,11 @@ class Executor:
                 message=f"Collection '{node.collection}' already exists",
             )
 
+        dense_model_name = node.model or self._config.default_model
+
         # ── Hybrid collection: named dense + sparse vectors ────────────────
         if node.hybrid:
-            embedder = Embedder(self._config.default_model)
+            embedder = Embedder(dense_model_name)
             dims = embedder.dimensions
             self._client.create_collection(
                 collection_name=node.collection,
@@ -199,7 +201,7 @@ class Executor:
             )
 
         # ── Standard dense-only collection ─────────────────────────────────
-        embedder = Embedder(self._config.default_model)
+        embedder = Embedder(dense_model_name)
         dims = embedder.dimensions
         self._client.create_collection(
             collection_name=node.collection,
@@ -299,6 +301,46 @@ class Executor:
             return ExecutionResult(
                 success=True,
                 message=f"Found {len(results)} result(s) (hybrid)",
+                data=results,
+            )
+
+        # ── Sparse-only SEARCH: query the "sparse" named vector directly ─────
+        if node.sparse_only:
+            sparse_model_name = node.sparse_model or SparseEmbedder.DEFAULT_MODEL
+            sparse_embedder = SparseEmbedder(sparse_model_name)
+            sparse_obj = sparse_embedder.query_embed(node.query_text)
+            sparse_vector = SparseVector(
+                indices=sparse_obj["indices"],
+                values=sparse_obj["values"],
+            )
+
+            try:
+                response = self._client.query_points(
+                    collection_name=node.collection,
+                    query=sparse_vector,
+                    using="sparse",
+                    limit=fetch_limit,
+                    query_filter=qdrant_filter,
+                )
+            except UnexpectedResponse as e:
+                raise QQLRuntimeError(f"Qdrant error during SEARCH: {e}") from e
+
+            results = [
+                {"id": str(h.id), "score": round(h.score, 4), "payload": h.payload}
+                for h in response.points
+            ]
+
+            if node.rerank:
+                results = self._apply_reranking(node.query_text, results, node.limit, node.rerank_model)
+                return ExecutionResult(
+                    success=True,
+                    message=f"Found {len(results)} result(s) (sparse, reranked)",
+                    data=results,
+                )
+
+            return ExecutionResult(
+                success=True,
+                message=f"Found {len(results)} result(s) (sparse)",
                 data=results,
             )
 

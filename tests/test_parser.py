@@ -347,6 +347,48 @@ class TestHybridCreate:
         assert node.hybrid is True
 
 
+class TestCreateUsing:
+    def test_create_using_model(self):
+        node = parse("CREATE COLLECTION articles USING MODEL 'BAAI/bge-base-en-v1.5'")
+        assert isinstance(node, CreateCollectionStmt)
+        assert node.hybrid is False
+        assert node.model == "BAAI/bge-base-en-v1.5"
+
+    def test_create_using_hybrid(self):
+        node = parse("CREATE COLLECTION articles USING HYBRID")
+        assert isinstance(node, CreateCollectionStmt)
+        assert node.hybrid is True
+        assert node.model is None
+
+    def test_create_using_hybrid_dense_model(self):
+        node = parse("CREATE COLLECTION articles USING HYBRID DENSE MODEL 'BAAI/bge-base-en-v1.5'")
+        assert node.hybrid is True
+        assert node.model == "BAAI/bge-base-en-v1.5"
+
+    def test_create_bare_hybrid_backward_compat(self):
+        node = parse("CREATE COLLECTION articles HYBRID")
+        assert node.hybrid is True
+        assert node.model is None
+
+    def test_create_plain_backward_compat(self):
+        node = parse("CREATE COLLECTION articles")
+        assert node.hybrid is False
+        assert node.model is None
+
+    def test_create_using_model_sets_collection_name(self):
+        node = parse("CREATE COLLECTION my_col USING MODEL 'some/model'")
+        assert isinstance(node, CreateCollectionStmt)
+        assert node.collection == "my_col"
+
+    def test_create_using_hybrid_case_insensitive(self):
+        node = parse("create collection articles using hybrid")
+        assert node.hybrid is True
+
+    def test_create_using_model_case_insensitive(self):
+        node = parse("create collection articles using model 'some/model'")
+        assert node.model == "some/model"
+
+
 class TestHybridInsert:
     def test_insert_using_hybrid_sets_flag(self):
         node = parse("INSERT INTO COLLECTION col VALUES {'text': 'hi'} USING HYBRID")
@@ -616,3 +658,56 @@ class TestSearchWithClause:
     def test_with_trailing_comma(self):
         node = parse("SEARCH col SIMILAR TO 'q' LIMIT 5 WITH { hnsw_ef: 256, }")
         assert node.with_clause.hnsw_ef == 256
+
+
+class TestSparseOnlySearch:
+    def test_using_sparse_sets_flag(self):
+        node = parse("SEARCH col SIMILAR TO 'q' LIMIT 5 USING SPARSE")
+        assert node.sparse_only is True
+        assert node.hybrid is False
+        assert node.sparse_model is None
+
+    def test_using_sparse_with_model(self):
+        node = parse(
+            "SEARCH col SIMILAR TO 'q' LIMIT 5 USING SPARSE MODEL 'prithivida/Splade_PP_en_v1'"
+        )
+        assert node.sparse_only is True
+        assert node.sparse_model == "prithivida/Splade_PP_en_v1"
+
+    def test_using_sparse_default_flags(self):
+        """All other fields remain at their defaults when USING SPARSE is used."""
+        node = parse("SEARCH col SIMILAR TO 'q' LIMIT 5 USING SPARSE")
+        assert node.hybrid is False
+        assert node.model is None
+        assert node.rerank is False
+        assert node.query_filter is None
+
+    def test_using_sparse_with_where(self):
+        node = parse(
+            "SEARCH col SIMILAR TO 'q' LIMIT 5 USING SPARSE WHERE year > 2020"
+        )
+        assert node.sparse_only is True
+        assert node.query_filter is not None
+
+    def test_using_sparse_with_rerank(self):
+        node = parse("SEARCH col SIMILAR TO 'q' LIMIT 5 USING SPARSE RERANK")
+        assert node.sparse_only is True
+        assert node.rerank is True
+
+    def test_using_sparse_with_model_and_rerank(self):
+        node = parse(
+            "SEARCH col SIMILAR TO 'q' LIMIT 5 "
+            "USING SPARSE MODEL 'prithivida/Splade_PP_en_v1' RERANK"
+        )
+        assert node.sparse_only is True
+        assert node.sparse_model == "prithivida/Splade_PP_en_v1"
+        assert node.rerank is True
+
+    def test_sparse_only_false_by_default(self):
+        node = parse("SEARCH col SIMILAR TO 'q' LIMIT 5")
+        assert node.sparse_only is False
+
+    def test_sparse_only_false_for_hybrid(self):
+        node = parse("SEARCH col SIMILAR TO 'q' LIMIT 5 USING HYBRID")
+        assert node.sparse_only is False
+        assert node.hybrid is True
