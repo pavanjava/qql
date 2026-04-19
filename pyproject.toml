@@ -1,6 +1,6 @@
 [project]
 name = "qql-cli"
-version = "1.2.0"
+version = "1.3.0"
 description = "A SQL-like query language CLI wrapper for Qdrant vector database"
 readme = "README.md"
 license = { file = "LICENSE" }
