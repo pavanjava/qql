@@ -56,6 +56,15 @@ Available statements:
   [yellow]DELETE FROM[/yellow] <name> [yellow]WHERE id =[/yellow] '<id>'
       Delete a point by its ID.
 
+Script files (in-shell):
+  [yellow]EXECUTE[/yellow] <path>   or   [yellow]\\e[/yellow] <path>
+      Run a .qql script file. Statements are executed in order.
+      Lines starting with [yellow]--[/yellow] are treated as comments and ignored.
+
+  [yellow]DUMP[/yellow] <name> <output.qql>   or   [yellow]DUMP COLLECTION[/yellow] <name> <output.qql>
+      Export all points in a collection to a .qql script file.
+      The file can be re-imported with EXECUTE.
+
 Keyboard shortcuts:
   ← → arrows   move cursor within the current line
   ↑ ↓ arrows   scroll through command history
@@ -119,6 +128,109 @@ def disconnect() -> None:
     console.print("Disconnected. Config removed.")
 
 
+# ── execute ────────────────────────────────────────────────────────────────────
+
+@main.command()
+@click.argument("file", type=click.Path(exists=True, readable=True))
+@click.option(
+    "--stop-on-error",
+    is_flag=True,
+    default=False,
+    help="Halt execution on the first statement error (default: continue all).",
+)
+def execute(file: str, stop_on_error: bool) -> None:
+    """Execute a .qql script file against the connected Qdrant instance.
+
+    Lines beginning with -- are treated as comments and skipped.
+    Each QQL statement is executed in order and its result is printed.
+    """
+    from qdrant_client import QdrantClient
+
+    cfg = load_config()
+    if cfg is None:
+        err_console.print(
+            "[bold red]Not connected.[/bold red] "
+            "Run: [bold]qql connect --url <url>[/bold]"
+        )
+        sys.exit(1)
+
+    try:
+        client = QdrantClient(url=cfg.url, api_key=cfg.secret)
+        client.get_collections()
+    except Exception as e:
+        err_console.print(f"[bold red]Connection failed:[/bold red] {e}")
+        sys.exit(1)
+
+    from .executor import Executor
+    from .script import run_script
+
+    executor = Executor(client, cfg)
+    console.print(f"[bold cyan]Executing:[/bold cyan] {file}\n")
+
+    ok, fail = run_script(file, executor, console, err_console, stop_on_error)
+    total = ok + fail
+
+    if fail == 0:
+        console.print(
+            f"\n[bold green]Done.[/bold green] "
+            f"{total}/{total} statement(s) succeeded."
+        )
+    else:
+        console.print(
+            f"\n[bold yellow]Done.[/bold yellow] "
+            f"{ok}/{total} succeeded, [bold red]{fail} failed[/bold red]."
+        )
+        sys.exit(1)
+
+
+# ── dump ───────────────────────────────────────────────────────────────────────
+
+@main.command()
+@click.argument("collection")
+@click.argument("output", type=click.Path())
+def dump(collection: str, output: str) -> None:
+    """Dump a collection to a .qql script file.
+
+    OUTPUT is the path for the generated .qql file.
+    The file contains CREATE COLLECTION + INSERT BULK statements and can be
+    re-imported with: qql execute <output>
+    """
+    from qdrant_client import QdrantClient
+
+    cfg = load_config()
+    if cfg is None:
+        err_console.print(
+            "[bold red]Not connected.[/bold red] "
+            "Run: [bold]qql connect --url <url>[/bold]"
+        )
+        sys.exit(1)
+
+    try:
+        client = QdrantClient(url=cfg.url, api_key=cfg.secret)
+        client.get_collections()
+    except Exception as e:
+        err_console.print(f"[bold red]Connection failed:[/bold red] {e}")
+        sys.exit(1)
+
+    from .dumper import dump_collection
+
+    console.print(
+        f"[bold cyan]Dumping:[/bold cyan] '{collection}'  →  {output}\n"
+    )
+    written, skipped = dump_collection(collection, output, client, console, err_console)
+
+    if written == 0 and skipped == 0:
+        # collection not found — error already printed by dump_collection
+        sys.exit(1)
+
+    console.print(
+        f"\n[bold green]Done.[/bold green] "
+        f"{written} point(s) written"
+        + (f", [yellow]{skipped} skipped[/yellow] (no 'text' field)" if skipped else "")
+        + f"."
+    )
+
+
 # ── REPL ───────────────────────────────────────────────────────────────────────
 
 def _launch_repl(cfg: QQLConfig) -> None:
@@ -159,6 +271,62 @@ def _launch_repl(cfg: QQLConfig) -> None:
             break
         if low in ("help", "\\h", "?"):
             console.print(HELP_TEXT)
+            continue
+
+        # ── EXECUTE <path> / \e <path> — run a .qql script file ──────────
+        if low.startswith("execute ") or low.startswith("\\e "):
+            script_path = query.split(None, 1)[1].strip()
+            from .script import run_script
+            ok, fail = run_script(script_path, executor, console, err_console)
+            total = ok + fail
+            if fail == 0:
+                console.print(
+                    f"[bold green]Done.[/bold green] "
+                    f"{total}/{total} statement(s) succeeded."
+                )
+            else:
+                console.print(
+                    f"[bold yellow]Done.[/bold yellow] "
+                    f"{ok}/{total} succeeded, [bold red]{fail} failed[/bold red]."
+                )
+            continue
+
+        # ── DUMP [COLLECTION] <name> <file> — export collection to .qql ──
+        # Accepts both:
+        #   DUMP COLLECTION <name> <output.qql>
+        #   DUMP <name> <output.qql>
+        if low.startswith("dump "):
+            parts = query.split(None, 3)  # up to 4 tokens
+            if len(parts) >= 2 and parts[1].lower() == "collection":
+                # DUMP COLLECTION <name> <file>
+                if len(parts) < 4:
+                    err_console.print(
+                        "[bold red]Usage:[/bold red] DUMP COLLECTION <name> <output.qql>"
+                    )
+                    continue
+                coll_name, out_path = parts[2], parts[3]
+            else:
+                # DUMP <name> <file>
+                if len(parts) < 3:
+                    err_console.print(
+                        "[bold red]Usage:[/bold red] DUMP <name> <output.qql>"
+                    )
+                    continue
+                coll_name, out_path = parts[1], parts[2]
+            from .dumper import dump_collection
+            console.print(
+                f"[bold cyan]Dumping:[/bold cyan] '{coll_name}'  →  {out_path}\n"
+            )
+            written, skipped = dump_collection(
+                coll_name, out_path, client, console, err_console
+            )
+            if written > 0 or skipped == 0:
+                console.print(
+                    f"[bold green]Done.[/bold green] "
+                    f"{written} point(s) written"
+                    + (f", [yellow]{skipped} skipped[/yellow] (no 'text' field)" if skipped else "")
+                    + "."
+                )
             continue
 
         _run_and_print(executor, query)
