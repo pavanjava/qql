@@ -1,0 +1,537 @@
+-- Qdrant Query Language
+-- BULK INSERT SAMPLE
+
+-- ============================================================
+--  QQL — Medical Knowledge Base
+--  Collection: medical_records
+--  Departments: Neurology (12), Cardiology (10), Oncology (9),
+--               Orthopedics (5), Pulmonology (5)
+--  Total: 41 records | Repeated domains: neurology, cardiology, oncology
+-- ============================================================
+
+-- Step 0: Show Collections
+SHOW COLLECTIONS
+
+-- Step 1: Create the collection
+CREATE COLLECTION medical_records
+
+-- ============================================================
+-- Step 2
+-- BULK INSERT — NEUROLOGY (batch 1 of 2)
+-- ============================================================
+
+INSERT BULK INTO COLLECTION medical_records VALUES [
+  {
+    'text': 'Alzheimers disease is characterized by progressive memory loss, cognitive decline, and accumulation of amyloid plaques and neurofibrillary tangles. Early detection using CSF Abeta42 and tau biomarkers is critical for disease-modifying therapy trials.',
+    'title': 'Alzheimers Disease Overview',
+    'department': 'neurology',
+    'sub_specialty': 'cognitive_neurology',
+    'document_type': 'clinical_guideline',
+    'icd10_code': 'G30.9',
+    'severity': 'high',
+    'year': 2023,
+    'peer_reviewed': true
+  },
+  {
+    'text': 'Parkinsons disease involves degeneration of dopaminergic neurons in the substantia nigra, causing resting tremor, bradykinesia, rigidity, and postural instability. Levodopa is gold standard but long-term use causes dyskinesias.',
+    'title': 'Parkinsons Disease Motor Management',
+    'department': 'neurology',
+    'sub_specialty': 'movement_disorders',
+    'document_type': 'treatment_protocol',
+    'icd10_code': 'G20',
+    'severity': 'high',
+    'year': 2024,
+    'peer_reviewed': true
+  },
+  {
+    'text': 'Ischemic stroke occurs when a cerebral artery is occluded by thrombus or embolus causing neuronal death. IV alteplase within 4.5 hours significantly reduces disability. Mechanical thrombectomy extends the treatment window up to 24 hours in selected patients.',
+    'title': 'Acute Ischemic Stroke Thrombolysis Protocol',
+    'department': 'neurology',
+    'sub_specialty': 'stroke_neurology',
+    'document_type': 'emergency_protocol',
+    'icd10_code': 'I63.9',
+    'severity': 'critical',
+    'year': 2024,
+    'peer_reviewed': true
+  },
+  {
+    'text': 'Epilepsy is defined by recurrent unprovoked seizures. First-line medications include valproate, lamotrigine, and levetiracetam. Drug-resistant epilepsy may benefit from surgical resection, vagus nerve stimulation, or responsive neurostimulation.',
+    'title': 'Epilepsy Seizure Management',
+    'department': 'neurology',
+    'sub_specialty': 'epileptology',
+    'document_type': 'clinical_guideline',
+    'icd10_code': 'G40.909',
+    'severity': 'moderate',
+    'year': 2023,
+    'peer_reviewed': true
+  },
+  {
+    'text': 'Multiple sclerosis is an autoimmune demyelinating CNS disease. Relapsing-remitting MS is managed with disease-modifying therapies including interferon-beta, natalizumab, and ocrelizumab. MRI T2 lesion burden guides treatment escalation.',
+    'title': 'Multiple Sclerosis DMT Selection',
+    'department': 'neurology',
+    'sub_specialty': 'neuroimmunology',
+    'document_type': 'treatment_protocol',
+    'icd10_code': 'G35',
+    'severity': 'high',
+    'year': 2024,
+    'peer_reviewed': true
+  },
+  {
+    'text': 'Migraine is a primary headache disorder with recurrent unilateral throbbing pain, photophobia, and nausea. CGRP monoclonal antibodies erenumab and fremanezumab are effective preventive therapies with favorable safety profiles.',
+    'title': 'Migraine Prevention with CGRP Inhibitors',
+    'department': 'neurology',
+    'sub_specialty': 'headache_medicine',
+    'document_type': 'research_summary',
+    'icd10_code': 'G43.909',
+    'severity': 'moderate',
+    'year': 2023,
+    'peer_reviewed': true
+  }
+]
+
+-- ============================================================
+-- BULK INSERT — NEUROLOGY (batch 2 of 2 — intentional repeat)
+-- ============================================================
+
+INSERT BULK INTO COLLECTION medical_records VALUES [
+  {
+    'text': 'Guillain-Barre syndrome is an acute inflammatory demyelinating polyneuropathy following infection. Rapid ascending weakness can cause respiratory failure. IVIG and plasmapheresis are equally effective first-line treatments.',
+    'title': 'Guillain-Barre Syndrome ICU Management',
+    'department': 'neurology',
+    'sub_specialty': 'neuromuscular',
+    'document_type': 'emergency_protocol',
+    'icd10_code': 'G61.0',
+    'severity': 'critical',
+    'year': 2022,
+    'peer_reviewed': true
+  },
+  {
+    'text': 'Myasthenia gravis is caused by antibodies against acetylcholine receptors at the neuromuscular junction. Ptosis and diplopia are common presenting features. Pyridostigmine, immunosuppression, and thymectomy form the therapeutic triad.',
+    'title': 'Myasthenia Gravis Treatment Algorithm',
+    'department': 'neurology',
+    'sub_specialty': 'neuromuscular',
+    'document_type': 'clinical_guideline',
+    'icd10_code': 'G70.01',
+    'severity': 'high',
+    'year': 2023,
+    'peer_reviewed': true
+  },
+  {
+    'text': 'Transient ischemic attack is temporary neurological dysfunction from focal ischemia without infarction. ABCD2 score stratifies stroke risk. Urgent MRI DWI, vascular imaging, cardiac monitoring, and dual antiplatelet therapy reduce early stroke risk.',
+    'title': 'TIA Risk Stratification and Secondary Prevention',
+    'department': 'neurology',
+    'sub_specialty': 'stroke_neurology',
+    'document_type': 'clinical_guideline',
+    'icd10_code': 'G45.9',
+    'severity': 'high',
+    'year': 2024,
+    'peer_reviewed': true
+  },
+  {
+    'text': 'ALS causes progressive degeneration of upper and lower motor neurons leading to paralysis and respiratory failure. Riluzole modestly extends survival. Tofersen, an antisense oligonucleotide, reduces neurofilament levels in SOD1-ALS.',
+    'title': 'ALS Multidisciplinary Care and Novel Therapeutics',
+    'department': 'neurology',
+    'sub_specialty': 'neuromuscular',
+    'document_type': 'research_summary',
+    'icd10_code': 'G12.21',
+    'severity': 'critical',
+    'year': 2024,
+    'peer_reviewed': true
+  },
+  {
+    'text': 'Normal pressure hydrocephalus presents with gait disturbance, urinary incontinence, and cognitive impairment. CSF tap test predicts surgical response. Ventriculoperitoneal shunting provides sustained improvement in appropriately selected patients.',
+    'title': 'Normal Pressure Hydrocephalus VP Shunt Outcomes',
+    'department': 'neurology',
+    'sub_specialty': 'cognitive_neurology',
+    'document_type': 'treatment_protocol',
+    'icd10_code': 'G91.2',
+    'severity': 'moderate',
+    'year': 2023,
+    'peer_reviewed': true
+  },
+  {
+    'text': 'Neuromyelitis optica spectrum disorder is mediated by AQP4-IgG antibodies causing severe optic neuritis and longitudinally extensive transverse myelitis. Inebilizumab, satralizumab, and eculizumab are FDA-approved for relapse prevention.',
+    'title': 'NMOSD AQP4 Targeted Biologic Therapies',
+    'department': 'neurology',
+    'sub_specialty': 'neuroimmunology',
+    'document_type': 'clinical_guideline',
+    'icd10_code': 'G36.0',
+    'severity': 'high',
+    'year': 2024,
+    'peer_reviewed': true
+  }
+]
+
+-- ============================================================
+-- BULK INSERT — CARDIOLOGY (batch 1 of 2)
+-- ============================================================
+
+INSERT BULK INTO COLLECTION medical_records VALUES [
+  {
+    'text': 'STEMI requires emergent revascularization. Primary PCI with door-to-balloon under 90 minutes is preferred. Aspirin plus P2Y12 inhibitor dual antiplatelet therapy reduces reinfarction risk significantly.',
+    'title': 'STEMI Primary PCI Protocol',
+    'department': 'cardiology',
+    'sub_specialty': 'interventional_cardiology',
+    'document_type': 'emergency_protocol',
+    'icd10_code': 'I21.3',
+    'severity': 'critical',
+    'year': 2024,
+    'peer_reviewed': true
+  },
+  {
+    'text': 'Heart failure with reduced ejection fraction below 40% is managed with ACE inhibitors or ARNIs, beta-blockers, mineralocorticoid receptor antagonists, and SGLT2 inhibitors. CRT is indicated in LBBB with QRS above 150ms.',
+    'title': 'HFrEF Guideline-Directed Medical Therapy',
+    'department': 'cardiology',
+    'sub_specialty': 'heart_failure',
+    'document_type': 'clinical_guideline',
+    'icd10_code': 'I50.20',
+    'severity': 'high',
+    'year': 2024,
+    'peer_reviewed': true
+  },
+  {
+    'text': 'Atrial fibrillation management uses rate control with beta-blockers or rhythm control with antiarrhythmics or ablation. CHA2DS2-VASc score guides anticoagulation to prevent thromboembolic stroke in AF patients.',
+    'title': 'Atrial Fibrillation Anticoagulation Strategy',
+    'department': 'cardiology',
+    'sub_specialty': 'electrophysiology',
+    'document_type': 'clinical_guideline',
+    'icd10_code': 'I48.91',
+    'severity': 'moderate',
+    'year': 2023,
+    'peer_reviewed': true
+  },
+  {
+    'text': 'Hypertrophic cardiomyopathy with LVOT gradient above 50mmHg causing refractory symptoms is treated with septal myectomy or alcohol ablation. Mavacamten, a cardiac myosin inhibitor, provides a novel pharmacological option.',
+    'title': 'Hypertrophic Cardiomyopathy LVOT Obstruction',
+    'department': 'cardiology',
+    'sub_specialty': 'structural_heart',
+    'document_type': 'treatment_protocol',
+    'icd10_code': 'I42.1',
+    'severity': 'high',
+    'year': 2024,
+    'peer_reviewed': true
+  },
+  {
+    'text': 'Severe aortic stenosis with valve area below 1cm2 and gradient above 40mmHg warrants valve replacement. TAVR has expanded to low-risk patients and now competes with SAVR across all surgical risk categories.',
+    'title': 'Severe Aortic Stenosis TAVR vs SAVR',
+    'department': 'cardiology',
+    'sub_specialty': 'structural_heart',
+    'document_type': 'research_summary',
+    'icd10_code': 'I35.0',
+    'severity': 'high',
+    'year': 2023,
+    'peer_reviewed': true
+  }
+]
+
+-- ============================================================
+-- BULK INSERT — CARDIOLOGY (batch 2 of 2 — intentional repeat)
+-- ============================================================
+
+INSERT BULK INTO COLLECTION medical_records VALUES [
+  {
+    'text': 'Ventricular tachycardia in structural heart disease carries sudden cardiac death risk. ICD is first-line in LVEF below 35%. Catheter ablation reduces VT burden. Amiodarone is the most efficacious antiarrhythmic agent available.',
+    'title': 'Ventricular Tachycardia ICD and Catheter Ablation',
+    'department': 'cardiology',
+    'sub_specialty': 'electrophysiology',
+    'document_type': 'treatment_protocol',
+    'icd10_code': 'I47.2',
+    'severity': 'critical',
+    'year': 2022,
+    'peer_reviewed': true
+  },
+  {
+    'text': 'Pulmonary arterial hypertension with mean PAP above 20mmHg is treated with endothelin receptor antagonists, PDE5 inhibitors, and prostacyclin analogues. Upfront combination therapy improves long-term survival in high-risk patients.',
+    'title': 'Pulmonary Arterial Hypertension Combination Therapy',
+    'department': 'cardiology',
+    'sub_specialty': 'pulmonary_hypertension',
+    'document_type': 'clinical_guideline',
+    'icd10_code': 'I27.0',
+    'severity': 'high',
+    'year': 2024,
+    'peer_reviewed': true
+  },
+  {
+    'text': 'Cardiac sarcoidosis with granulomatous myocardial infiltration causes arrhythmias, heart block, and LV dysfunction. FDG-PET guides corticosteroid therapy. ICD is recommended in patients with documented VT or significant LV dysfunction.',
+    'title': 'Cardiac Sarcoidosis FDG-PET and ICD Therapy',
+    'department': 'cardiology',
+    'sub_specialty': 'heart_failure',
+    'document_type': 'research_summary',
+    'icd10_code': 'I43',
+    'severity': 'high',
+    'year': 2023,
+    'peer_reviewed': true
+  },
+  {
+    'text': 'Transthyretin amyloid cardiomyopathy results from misfolded TTR protein deposition. Tafamidis stabilizes the TTR tetramer and reduces cardiovascular mortality. Bone scintigraphy with technetium pyrophosphate is highly sensitive for ATTR-CM diagnosis.',
+    'title': 'ATTR Cardiomyopathy Tafamidis Therapy',
+    'department': 'cardiology',
+    'sub_specialty': 'heart_failure',
+    'document_type': 'clinical_guideline',
+    'icd10_code': 'E85.4',
+    'severity': 'high',
+    'year': 2024,
+    'peer_reviewed': true
+  },
+  {
+    'text': 'Spontaneous coronary artery dissection predominantly affects young women and is a leading MI cause in patients under 50 without conventional risk factors. Conservative management is favored as PCI can propagate the dissection. SCAD recurs in approximately 10% of cases.',
+    'title': 'Spontaneous Coronary Artery Dissection Management',
+    'department': 'cardiology',
+    'sub_specialty': 'interventional_cardiology',
+    'document_type': 'research_summary',
+    'icd10_code': 'I25.42',
+    'severity': 'critical',
+    'year': 2023,
+    'peer_reviewed': true
+  }
+]
+
+-- ============================================================
+-- BULK INSERT — ONCOLOGY (batch 1 of 2)
+-- ============================================================
+
+INSERT BULK INTO COLLECTION medical_records VALUES [
+  {
+    'text': 'EGFR-mutant NSCLC with exon 19 deletion or L858R responds to TKIs. Third-generation osimertinib is preferred first-line due to superior CNS penetration and activity against T790M resistance mutations over erlotinib and gefitinib.',
+    'title': 'EGFR-Mutant NSCLC Osimertinib First-Line',
+    'department': 'oncology',
+    'sub_specialty': 'thoracic_oncology',
+    'document_type': 'treatment_protocol',
+    'icd10_code': 'C34.90',
+    'severity': 'high',
+    'year': 2024,
+    'peer_reviewed': true
+  },
+  {
+    'text': 'Diffuse large B-cell lymphoma is treated with R-CHOP achieving cure in 60% of patients. CAR-T therapy with axicabtagene ciloleucel or lisocabtagene maraleucel is approved for relapsed or refractory DLBCL after two prior lines.',
+    'title': 'DLBCL CAR-T Therapy in Relapsed Disease',
+    'department': 'oncology',
+    'sub_specialty': 'hematologic_oncology',
+    'document_type': 'clinical_guideline',
+    'icd10_code': 'C83.30',
+    'severity': 'critical',
+    'year': 2023,
+    'peer_reviewed': true
+  },
+  {
+    'text': 'Triple-negative breast cancer lacks ER, PR, and HER2 expression. Pembrolizumab plus chemotherapy improves event-free survival in PD-L1-positive TNBC. PARP inhibitors benefit patients with germline BRCA1 or BRCA2 mutations.',
+    'title': 'Triple-Negative Breast Cancer Immunotherapy',
+    'department': 'oncology',
+    'sub_specialty': 'breast_oncology',
+    'document_type': 'treatment_protocol',
+    'icd10_code': 'C50.919',
+    'severity': 'high',
+    'year': 2024,
+    'peer_reviewed': true
+  },
+  {
+    'text': 'MSI-H colorectal cancer responds exceptionally to immune checkpoint inhibitors. Pembrolizumab monotherapy is first-line for MSI-H metastatic CRC. RAS and BRAF mutation status guides anti-EGFR antibody eligibility in non-MSI-H patients.',
+    'title': 'MSI-H Colorectal Cancer Immunotherapy',
+    'department': 'oncology',
+    'sub_specialty': 'gastrointestinal_oncology',
+    'document_type': 'clinical_guideline',
+    'icd10_code': 'C18.9',
+    'severity': 'high',
+    'year': 2023,
+    'peer_reviewed': true
+  },
+  {
+    'text': 'Glioblastoma multiforme median survival is 15 months. Standard of care is maximal safe resection followed by concurrent temozolomide and radiotherapy then adjuvant temozolomide. MGMT promoter methylation predicts chemotherapy benefit.',
+    'title': 'Glioblastoma Stupp Protocol and MGMT Status',
+    'department': 'oncology',
+    'sub_specialty': 'neuro_oncology',
+    'document_type': 'treatment_protocol',
+    'icd10_code': 'C71.9',
+    'severity': 'critical',
+    'year': 2023,
+    'peer_reviewed': true
+  }
+]
+
+-- ============================================================
+-- BULK INSERT — ONCOLOGY (batch 2 of 2 — intentional repeat)
+-- ============================================================
+
+INSERT BULK INTO COLLECTION medical_records VALUES [
+  {
+    'text': 'FLT3-ITD mutated AML carries poor prognosis. Midostaurin added to induction chemotherapy improves overall survival. Gilteritinib is a second-generation FLT3 inhibitor with superior activity in relapsed or refractory AML settings.',
+    'title': 'FLT3-Mutated AML Targeted Therapy',
+    'department': 'oncology',
+    'sub_specialty': 'hematologic_oncology',
+    'document_type': 'research_summary',
+    'icd10_code': 'C92.00',
+    'severity': 'critical',
+    'year': 2024,
+    'peer_reviewed': true
+  },
+  {
+    'text': 'BRCA2-mutated prostate cancer is sensitive to PARP inhibitors. Olaparib and rucaparib are approved for BRCA-altered metastatic castration-resistant prostate cancer after enzalutamide or abiraterone. Germline testing is recommended in all metastatic cases.',
+    'title': 'BRCA-Mutated Prostate Cancer PARP Inhibition',
+    'department': 'oncology',
+    'sub_specialty': 'genitourinary_oncology',
+    'document_type': 'treatment_protocol',
+    'icd10_code': 'C61',
+    'severity': 'high',
+    'year': 2024,
+    'peer_reviewed': true
+  },
+  {
+    'text': 'Hepatocellular carcinoma arising in cirrhotic livers is treated with atezolizumab plus bevacizumab as first-line systemic therapy. BCLC staging guides allocation across resection, ablation, transplant, TACE, and systemic therapy options.',
+    'title': 'Hepatocellular Carcinoma BCLC Staging and Systemic Therapy',
+    'department': 'oncology',
+    'sub_specialty': 'gastrointestinal_oncology',
+    'document_type': 'clinical_guideline',
+    'icd10_code': 'C22.0',
+    'severity': 'critical',
+    'year': 2024,
+    'peer_reviewed': true
+  },
+  {
+    'text': 'Immune checkpoint inhibitor toxicities including pneumonitis, colitis, hepatitis, and endocrinopathies require graded immunosuppression. Grade 3 to 4 toxicities mandate permanent discontinuation and high-dose methylprednisolone followed by a steroid taper.',
+    'title': 'Immune Checkpoint Inhibitor Toxicity Management',
+    'department': 'oncology',
+    'sub_specialty': 'immuno_oncology',
+    'document_type': 'clinical_guideline',
+    'icd10_code': 'T45.1X5A',
+    'severity': 'high',
+    'year': 2023,
+    'peer_reviewed': true
+  }
+]
+
+-- ============================================================
+-- BULK INSERT — ORTHOPEDICS
+-- ============================================================
+
+INSERT BULK INTO COLLECTION medical_records VALUES [
+  {
+    'text': 'Total knee arthroplasty for end-stage osteoarthritis uses cemented fixation as gold standard in older patients. Enhanced recovery after surgery protocols with multimodal analgesia reduce length of stay and opioid consumption.',
+    'title': 'Total Knee Arthroplasty ERAS Protocol',
+    'department': 'orthopedics',
+    'sub_specialty': 'joint_replacement',
+    'document_type': 'treatment_protocol',
+    'icd10_code': 'M17.11',
+    'severity': 'moderate',
+    'year': 2023,
+    'peer_reviewed': true
+  },
+  {
+    'text': 'ACL reconstruction uses bone-patellar tendon-bone or hamstring autograft for return to pivoting sports. Anatomic tunnel placement and progressive rehabilitation determine functional outcomes and reduce re-injury rates in athletes.',
+    'title': 'ACL Reconstruction Graft Selection',
+    'department': 'orthopedics',
+    'sub_specialty': 'sports_medicine',
+    'document_type': 'clinical_guideline',
+    'icd10_code': 'S83.511A',
+    'severity': 'moderate',
+    'year': 2024,
+    'peer_reviewed': true
+  },
+  {
+    'text': 'Osteoporotic vertebral compression fractures are treated with balloon kyphoplasty for height restoration and pain relief. Bisphosphonate or denosumab therapy is essential to prevent subsequent fractures in the same patient.',
+    'title': 'Vertebral Compression Fracture Kyphoplasty',
+    'department': 'orthopedics',
+    'sub_specialty': 'spine',
+    'document_type': 'treatment_protocol',
+    'icd10_code': 'M80.08XA',
+    'severity': 'moderate',
+    'year': 2022,
+    'peer_reviewed': true
+  },
+  {
+    'text': 'Adult hip dysplasia with insufficient acetabular coverage predisposes to early osteoarthritis. Periacetabular osteotomy reorients the acetabulum to increase coverage. Patient selection based on joint space, age, and Tonnis grade is critical.',
+    'title': 'Adult Hip Dysplasia PAO Outcomes',
+    'department': 'orthopedics',
+    'sub_specialty': 'hip_preservation',
+    'document_type': 'research_summary',
+    'icd10_code': 'Q65.89',
+    'severity': 'moderate',
+    'year': 2023,
+    'peer_reviewed': true
+  },
+  {
+    'text': 'Proximal humerus fractures in elderly patients with osteoporosis are often managed non-operatively. Reverse total shoulder arthroplasty is preferred over ORIF in comminuted four-part fractures in patients over 65 years of age.',
+    'title': 'Proximal Humerus Fracture rTSA vs ORIF',
+    'department': 'orthopedics',
+    'sub_specialty': 'shoulder_elbow',
+    'document_type': 'clinical_guideline',
+    'icd10_code': 'S42.201A',
+    'severity': 'moderate',
+    'year': 2024,
+    'peer_reviewed': true
+  }
+]
+
+-- ============================================================
+-- BULK INSERT — PULMONOLOGY
+-- ============================================================
+
+INSERT BULK INTO COLLECTION medical_records VALUES [
+  {
+    'text': 'COPD exacerbations are managed with short-acting bronchodilators, systemic corticosteroids, and antibiotics. Non-invasive positive pressure ventilation reduces intubation rates in hypercapnic respiratory failure significantly.',
+    'title': 'COPD Acute Exacerbation Management',
+    'department': 'pulmonology',
+    'sub_specialty': 'obstructive_lung_disease',
+    'document_type': 'emergency_protocol',
+    'icd10_code': 'J44.1',
+    'severity': 'high',
+    'year': 2024,
+    'peer_reviewed': true
+  },
+  {
+    'text': 'Idiopathic pulmonary fibrosis with median survival of 3 to 5 years is slowed by nintedanib and pirfenidone reducing FVC decline rate. HRCT demonstrating a UIP pattern is sufficient for diagnosis without surgical biopsy in appropriate clinical context.',
+    'title': 'IPF Antifibrotic Therapy Guidelines',
+    'department': 'pulmonology',
+    'sub_specialty': 'interstitial_lung_disease',
+    'document_type': 'clinical_guideline',
+    'icd10_code': 'J84.112',
+    'severity': 'high',
+    'year': 2023,
+    'peer_reviewed': true
+  },
+  {
+    'text': 'Severe asthma uncontrolled on high-dose ICS-LABA benefits from biologic add-on therapies. Mepolizumab targets eosinophilic inflammation, omalizumab targets IgE in allergic asthma, and tezepelumab blocks TSLP across multiple phenotypes.',
+    'title': 'Severe Asthma Biologic Therapy Selection',
+    'department': 'pulmonology',
+    'sub_specialty': 'asthma',
+    'document_type': 'treatment_protocol',
+    'icd10_code': 'J45.51',
+    'severity': 'high',
+    'year': 2024,
+    'peer_reviewed': true
+  },
+  {
+    'text': 'Obstructive sleep apnea with repetitive upper airway collapse is treated first-line with CPAP. Mandibular advancement devices and hypoglossal nerve stimulation with Inspire therapy are alternatives for CPAP-intolerant patients.',
+    'title': 'OSA CPAP vs Inspire Nerve Stimulation',
+    'department': 'pulmonology',
+    'sub_specialty': 'sleep_medicine',
+    'document_type': 'clinical_guideline',
+    'icd10_code': 'G47.33',
+    'severity': 'moderate',
+    'year': 2023,
+    'peer_reviewed': true
+  },
+  {
+    'text': 'ARDS is defined by bilateral infiltrates and PaO2-FiO2 below 300 of non-cardiogenic origin. Lung-protective ventilation with 6 mL/kg tidal volumes and plateau pressure below 30 cmH2O reduces mortality. Prone positioning for 16 hours improves oxygenation in severe ARDS.',
+    'title': 'ARDS Lung Protective Ventilation and Proning',
+    'department': 'pulmonology',
+    'sub_specialty': 'critical_care',
+    'document_type': 'emergency_protocol',
+    'icd10_code': 'J80',
+    'severity': 'critical',
+    'year': 2024,
+    'peer_reviewed': true
+  }
+]
+
+-- Step 3: SHOW Collections once Bulk Insert is done
+SHOW COLLECTIONS
+
+-- ============================================================
+-- END OF BULK INSERT
+-- Total records : 41
+-- neurology     : 12  (2 batches — intentional repeat)
+-- cardiology    : 10  (2 batches — intentional repeat)
+-- oncology      :  9  (2 batches — intentional repeat)
+-- orthopedics   :  5  (1 batch)
+-- pulmonology   :  5  (1 batch)
+-- ============================================================
