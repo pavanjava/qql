@@ -100,8 +100,12 @@ class Executor:
         if "text" not in node.values:
             raise QQLRuntimeError("INSERT requires a 'text' field in VALUES")
 
+        # Auto-detect hybrid when the user omitted USING HYBRID but the
+        # collection already exists as a hybrid (named-vector) collection.
+        use_hybrid = node.hybrid or self._collection_is_hybrid(node.collection)
+
         # ── Hybrid INSERT: dense + sparse vectors ──────────────────────────
-        if node.hybrid:
+        if use_hybrid:
             dense_model = node.model or self._config.default_model
             sparse_model_name = node.sparse_model or SparseEmbedder.DEFAULT_MODEL
             dense_embedder = Embedder(dense_model)
@@ -182,8 +186,12 @@ class Executor:
                     f"INSERT BULK: item at index {i} is missing required 'text' field"
                 )
 
+        # Auto-detect hybrid when the user omitted USING HYBRID but the
+        # collection already exists as a hybrid (named-vector) collection.
+        use_hybrid = node.hybrid or self._collection_is_hybrid(node.collection)
+
         # ── Hybrid bulk INSERT: dense + sparse vectors ─────────────────────
-        if node.hybrid:
+        if use_hybrid:
             dense_model = node.model or self._config.default_model
             sparse_model_name = node.sparse_model or SparseEmbedder.DEFAULT_MODEL
             dense_embedder = Embedder(dense_model)
@@ -612,6 +620,14 @@ class Executor:
         return Filter(must=[qdrant_expr])
 
     # ── Collection helpers ────────────────────────────────────────────────
+
+    def _collection_is_hybrid(self, name: str) -> bool:
+        """Return True if *name* exists and uses named vectors (hybrid collection)."""
+        if not self._client.collection_exists(name):
+            return False
+        info = self._client.get_collection(name)
+        vectors = info.config.params.vectors  # type: ignore[union-attr]
+        return isinstance(vectors, dict)
 
     def _ensure_collection(self, name: str, vector_size: int) -> None:
         """Create the collection if it doesn't exist. Raises on dimension mismatch.
