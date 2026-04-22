@@ -74,6 +74,25 @@ RECOMMEND FROM qql_sample_v2
   LIMIT 3
   WHERE department = 'neurology'
 
+-- Recommend with pagination and score threshold
+RECOMMEND FROM qql_sample_v2
+  POSITIVE IDS (2001)
+  LIMIT 5
+  OFFSET 2
+  SCORE THRESHOLD 0.3
+
+-- Recommend with exact KNN baseline
+RECOMMEND FROM qql_sample_v2
+  POSITIVE IDS (2001)
+  LIMIT 3
+  WITH { exact: true }
+
+-- Recommend using sparse vector instead of dense
+RECOMMEND FROM qql_sample_v2_hybrid
+  POSITIVE IDS (4001)
+  LIMIT 3
+  USING 'sparse'
+
 -- Hybrid collection
 CREATE COLLECTION qql_sample_v2_hybrid HYBRID
 

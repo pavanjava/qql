@@ -33,6 +33,11 @@ class TokenKind(Enum):
     SIMILAR = auto()
     TO = auto()
     LIMIT = auto()
+    OFFSET = auto()
+    SCORE = auto()
+    THRESHOLD = auto()
+    LOOKUP = auto()
+    VECTOR = auto()
     DELETE = auto()
     FROM = auto()
     WHERE = auto()
@@ -103,6 +108,11 @@ _KEYWORDS: dict[str, TokenKind] = {
     "SIMILAR": TokenKind.SIMILAR,
     "TO": TokenKind.TO,
     "LIMIT": TokenKind.LIMIT,
+    "OFFSET": TokenKind.OFFSET,
+    "SCORE": TokenKind.SCORE,
+    "THRESHOLD": TokenKind.THRESHOLD,
+    "LOOKUP": TokenKind.LOOKUP,
+    "VECTOR": TokenKind.VECTOR,
     "DELETE": TokenKind.DELETE,
     "FROM": TokenKind.FROM,
     "WHERE": TokenKind.WHERE,

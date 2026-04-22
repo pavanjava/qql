@@ -516,6 +516,111 @@ class TestRecommend:
         with pytest.raises(QQLRuntimeError, match="does not exist"):
             executor.execute(node)
 
+    def test_recommend_forwards_offset(self, executor, mock_client, mocker):
+        mock_client.collection_exists.return_value = True
+        mock_response = mocker.MagicMock()
+        mock_response.points = []
+        mock_client.query_points.return_value = mock_response
+
+        node = RecommendStmt(
+            collection="notes", positive_ids=("a",), limit=5, offset=10
+        )
+        executor.execute(node)
+        assert mock_client.query_points.call_args.kwargs["offset"] == 10
+
+    def test_recommend_forwards_score_threshold(self, executor, mock_client, mocker):
+        mock_client.collection_exists.return_value = True
+        mock_response = mocker.MagicMock()
+        mock_response.points = []
+        mock_client.query_points.return_value = mock_response
+
+        node = RecommendStmt(
+            collection="notes", positive_ids=("a",), limit=5, score_threshold=0.5
+        )
+        executor.execute(node)
+        assert mock_client.query_points.call_args.kwargs["score_threshold"] == pytest.approx(0.5)
+
+    def test_recommend_forwards_using(self, executor, mock_client, mocker):
+        mock_client.collection_exists.return_value = True
+        mock_response = mocker.MagicMock()
+        mock_response.points = []
+        mock_client.query_points.return_value = mock_response
+
+        node = RecommendStmt(
+            collection="notes", positive_ids=("a",), limit=5, using="sparse"
+        )
+        executor.execute(node)
+        assert mock_client.query_points.call_args.kwargs["using"] == "sparse"
+
+    def test_recommend_forwards_lookup_from(self, executor, mock_client, mocker):
+        from qdrant_client.models import LookupLocation
+
+        mock_client.collection_exists.return_value = True
+        mock_response = mocker.MagicMock()
+        mock_response.points = []
+        mock_client.query_points.return_value = mock_response
+
+        node = RecommendStmt(
+            collection="notes",
+            positive_ids=("a",),
+            limit=5,
+            lookup_from=("source", "dense"),
+        )
+        executor.execute(node)
+        lookup = mock_client.query_points.call_args.kwargs["lookup_from"]
+        assert isinstance(lookup, LookupLocation)
+        assert lookup.collection == "source"
+        assert lookup.vector == "dense"
+
+    def test_recommend_forwards_lookup_from_without_vector(self, executor, mock_client, mocker):
+        from qdrant_client.models import LookupLocation
+
+        mock_client.collection_exists.return_value = True
+        mock_response = mocker.MagicMock()
+        mock_response.points = []
+        mock_client.query_points.return_value = mock_response
+
+        node = RecommendStmt(
+            collection="notes",
+            positive_ids=("a",),
+            limit=5,
+            lookup_from=("source", None),
+        )
+        executor.execute(node)
+        lookup = mock_client.query_points.call_args.kwargs["lookup_from"]
+        assert isinstance(lookup, LookupLocation)
+        assert lookup.collection == "source"
+        assert lookup.vector is None
+
+    def test_recommend_forwards_search_params(self, executor, mock_client, mocker):
+        mock_client.collection_exists.return_value = True
+        mock_response = mocker.MagicMock()
+        mock_response.points = []
+        mock_client.query_points.return_value = mock_response
+
+        node = RecommendStmt(
+            collection="notes",
+            positive_ids=("a",),
+            limit=5,
+            with_clause=SearchWith(exact=True, hnsw_ef=128),
+        )
+        executor.execute(node)
+        search_params = mock_client.query_points.call_args.kwargs["search_params"]
+        assert search_params.exact is True
+        assert search_params.hnsw_ef == 128
+
+    def test_recommend_offset_zero_passes_none(self, executor, mock_client, mocker):
+        mock_client.collection_exists.return_value = True
+        mock_response = mocker.MagicMock()
+        mock_response.points = []
+        mock_client.query_points.return_value = mock_response
+
+        node = RecommendStmt(
+            collection="notes", positive_ids=("a",), limit=5, offset=0
+        )
+        executor.execute(node)
+        assert mock_client.query_points.call_args.kwargs["offset"] is None
+
 
 class TestDelete:
     def test_delete_calls_qdrant_delete(self, executor, mock_client):

@@ -237,6 +237,80 @@ class TestRecommend:
         with pytest.raises(QQLSyntaxError):
             parse("RECOMMEND FROM notes POSITIVE IDS () LIMIT 5")
 
+    def test_recommend_with_offset(self):
+        node = parse("RECOMMEND FROM notes POSITIVE IDS ('a') LIMIT 10 OFFSET 5")
+        assert node.offset == 5
+
+    def test_recommend_with_score_threshold(self):
+        node = parse(
+            "RECOMMEND FROM notes POSITIVE IDS ('a') LIMIT 10 SCORE THRESHOLD 0.5"
+        )
+        assert node.score_threshold == pytest.approx(0.5)
+
+    def test_recommend_with_clause(self):
+        node = parse(
+            "RECOMMEND FROM notes POSITIVE IDS ('a') LIMIT 10 WITH { exact: true }"
+        )
+        assert node.with_clause is not None
+        assert node.with_clause.exact is True
+
+    def test_recommend_with_clause_hnsw_ef(self):
+        node = parse(
+            "RECOMMEND FROM notes POSITIVE IDS ('a') LIMIT 10 WITH { hnsw_ef: 128 }"
+        )
+        assert node.with_clause is not None
+        assert node.with_clause.hnsw_ef == 128
+
+    def test_recommend_lookup_from(self):
+        node = parse(
+            "RECOMMEND FROM target_collection POSITIVE IDS ('a') "
+            "LOOKUP FROM source_collection LIMIT 5"
+        )
+        assert node.lookup_from == ("source_collection", None)
+
+    def test_recommend_lookup_from_with_vector(self):
+        node = parse(
+            "RECOMMEND FROM target_collection POSITIVE IDS ('a') "
+            "LOOKUP FROM source_collection VECTOR 'dense' LIMIT 5"
+        )
+        assert node.lookup_from == ("source_collection", "dense")
+
+    def test_recommend_using(self):
+        node = parse(
+            "RECOMMEND FROM docs POSITIVE IDS ('a') USING 'sparse' LIMIT 5"
+        )
+        assert node.using == "sparse"
+
+    def test_recommend_lookup_from_and_using(self):
+        node = parse(
+            "RECOMMEND FROM target_collection POSITIVE IDS ('a') "
+            "LOOKUP FROM source_collection VECTOR 'dense' USING 'sparse' LIMIT 5"
+        )
+        assert node.lookup_from == ("source_collection", "dense")
+        assert node.using == "sparse"
+
+    def test_recommend_full_clause_order(self):
+        node = parse(
+            "RECOMMEND FROM docs POSITIVE IDS ('a', 'b') "
+            "NEGATIVE IDS ('x') STRATEGY 'best_score' "
+            "LOOKUP FROM src VECTOR 'dense' USING 'sparse' "
+            "LIMIT 10 OFFSET 5 SCORE THRESHOLD 0.5 "
+            "WHERE year > 2020 WITH { exact: true, hnsw_ef: 128 }"
+        )
+        assert node.collection == "docs"
+        assert node.positive_ids == ("a", "b")
+        assert node.negative_ids == ("x",)
+        assert node.strategy == "best_score"
+        assert node.lookup_from == ("src", "dense")
+        assert node.using == "sparse"
+        assert node.limit == 10
+        assert node.offset == 5
+        assert node.score_threshold == pytest.approx(0.5)
+        assert isinstance(node.query_filter, CompareExpr)
+        assert node.with_clause is not None
+        assert node.with_clause.exact is True
+        assert node.with_clause.hnsw_ef == 128
+
 
 class TestErrors:
     def test_unknown_keyword(self):

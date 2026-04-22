@@ -392,10 +392,16 @@ This is useful when you already know which stored points represent the kind of r
 
 **Syntax:**
 ```sql
-RECOMMEND FROM <collection_name> POSITIVE IDS (1001, 1002) LIMIT <n>
-RECOMMEND FROM <collection_name> POSITIVE IDS (1001, 1002) NEGATIVE IDS (1003) LIMIT <n>
-RECOMMEND FROM <collection_name> POSITIVE IDS (1001) STRATEGY 'best_score' LIMIT <n>
-RECOMMEND FROM <collection_name> POSITIVE IDS (1001) LIMIT <n> WHERE <filter>
+RECOMMEND FROM <collection_name> POSITIVE IDS (<id>, ...) LIMIT <n>
+RECOMMEND FROM <collection_name> POSITIVE IDS (<id>, ...) NEGATIVE IDS (<id>, ...) LIMIT <n>
+RECOMMEND FROM <collection_name> POSITIVE IDS (<id>, ...) STRATEGY '<strategy>' LIMIT <n>
+RECOMMEND FROM <collection_name> POSITIVE IDS (<id>, ...) LIMIT <n> WHERE <filter>
+RECOMMEND FROM <collection_name> POSITIVE IDS (<id>, ...) LIMIT <n> OFFSET <n>
+RECOMMEND FROM <collection_name> POSITIVE IDS (<id>, ...) LIMIT <n> SCORE THRESHOLD <f>
+RECOMMEND FROM <collection_name> POSITIVE IDS (<id>, ...) LIMIT <n> WITH { exact: true, hnsw_ef: <n> }
+RECOMMEND FROM <collection_name> POSITIVE IDS (<id>, ...) LIMIT <n> LOOKUP FROM <collection>
+RECOMMEND FROM <collection_name> POSITIVE IDS (<id>, ...) LIMIT <n> LOOKUP FROM <collection> VECTOR '<name>'
+RECOMMEND FROM <collection_name> POSITIVE IDS (<id>, ...) LIMIT <n> USING '<vector_name>'
 ```
 
 **Examples:**
@@ -420,11 +426,59 @@ Recommend only within a filtered subset:
 RECOMMEND FROM articles POSITIVE IDS (1001) LIMIT 5 WHERE year >= 2020 AND status = 'published'
 ```
 
+Paginate recommendations (skip first 5, return next 10):
+```sql
+RECOMMEND FROM articles POSITIVE IDS (1001) LIMIT 10 OFFSET 5
+```
+
+Filter out low-confidence recommendations:
+```sql
+RECOMMEND FROM articles POSITIVE IDS (1001) LIMIT 10 SCORE THRESHOLD 0.5
+```
+
+Exact KNN baseline for recommendations:
+```sql
+RECOMMEND FROM articles POSITIVE IDS (1001) LIMIT 5 WITH { exact: true }
+```
+
+Cross-collection recommend (look up example IDs from another collection):
+```sql
+RECOMMEND FROM target_collection
+  POSITIVE IDS ('a')
+  LOOKUP FROM source_collection VECTOR 'dense'
+  LIMIT 5
+```
+
+Recommend using a specific named vector in the target collection:
+```sql
+RECOMMEND FROM articles
+  POSITIVE IDS (1001)
+  USING 'sparse'
+  LIMIT 5
+```
+
+Full-featured recommend:
+```sql
+RECOMMEND FROM articles
+  POSITIVE IDS (1001, 1002)
+  NEGATIVE IDS (1009)
+  STRATEGY 'best_score'
+  LOOKUP FROM other_collection VECTOR 'dense'
+  USING 'dense'
+  LIMIT 10
+  OFFSET 5
+  SCORE THRESHOLD 0.5
+  WHERE year >= 2020
+  WITH { exact: true }
+```
+
 **Supported strategies:**
 
 - `average_vector`
 - `best_score`
 - `sum_scores`
+
+**Clause order:** `POSITIVE IDS` → `NEGATIVE IDS` → `STRATEGY` → `LOOKUP FROM` → `USING` → `LIMIT` → `OFFSET` → `SCORE THRESHOLD` → `WHERE` → `WITH`
 
 ---
 

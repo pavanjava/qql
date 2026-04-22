@@ -178,6 +178,11 @@ class RecommendStmt:
     limit: int = 10
     strategy: str | None = None
     query_filter: FilterExpr | None = None
+    offset: int = 0
+    score_threshold: float | None = None
+    with_clause: SearchWith | None = None
+    lookup_from: tuple[str, str | None] | None = None
+    using: str | None = None
 
 
 @dataclass(frozen=True)

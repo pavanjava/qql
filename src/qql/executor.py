@@ -17,6 +17,7 @@ from qdrant_client.models import (
     HasIdCondition,
     IsEmptyCondition,
     IsNullCondition,
+    LookupLocation,
     MatchAny,
     MatchExcept,
     MatchPhrase,
@@ -509,12 +510,26 @@ class Executor:
             strategy=self._parse_recommend_strategy(node.strategy),
         )
 
+        search_params = self._build_search_params(node.with_clause)
+
+        lookup_from: LookupLocation | None = None
+        if node.lookup_from is not None:
+            lookup_from = LookupLocation(
+                collection=node.lookup_from[0],
+                vector=node.lookup_from[1],
+            )
+
         try:
             response = self._client.query_points(
                 collection_name=node.collection,
                 query=RecommendQuery(recommend=recommend_input),
                 limit=node.limit,
+                offset=node.offset or None,
                 query_filter=qdrant_filter,
+                search_params=search_params,
+                score_threshold=node.score_threshold,
+                using=node.using,
+                lookup_from=lookup_from,
             )
         except UnexpectedResponse as e:
             raise QQLRuntimeError(f"Qdrant error during RECOMMEND: {e}") from e
