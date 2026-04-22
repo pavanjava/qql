@@ -20,6 +20,7 @@ from qql.ast_nodes import (
     NotExpr,
     NotInExpr,
     OrExpr,
+    RecommendStmt,
     SearchStmt,
     SearchWith,
     ShowCollectionsStmt,
@@ -203,6 +204,38 @@ class TestDelete:
         node = parse("DELETE FROM notes WHERE id = 99")
         assert isinstance(node, DeleteStmt)
         assert node.point_id == 99
+
+
+class TestRecommend:
+    def test_recommend_with_positive_ids(self):
+        node = parse("RECOMMEND FROM notes POSITIVE IDS ('a', 'b') LIMIT 5")
+        assert isinstance(node, RecommendStmt)
+        assert node.collection == "notes"
+        assert node.positive_ids == ("a", "b")
+        assert node.negative_ids == ()
+        assert node.limit == 5
+        assert node.strategy is None
+
+    def test_recommend_with_negative_ids_and_strategy(self):
+        node = parse(
+            "RECOMMEND FROM notes POSITIVE IDS ('a', 2) "
+            "NEGATIVE IDS ('x') STRATEGY 'best_score' LIMIT 7"
+        )
+        assert node.positive_ids == ("a", 2)
+        assert node.negative_ids == ("x",)
+        assert node.strategy == "best_score"
+        assert node.limit == 7
+
+    def test_recommend_with_where_filter(self):
+        node = parse(
+            "RECOMMEND FROM notes POSITIVE IDS ('a') LIMIT 5 WHERE year > 2020"
+        )
+        assert isinstance(node.query_filter, CompareExpr)
+        assert node.query_filter.field == "year"
+
+    def test_recommend_requires_non_empty_positive_ids(self):
+        with pytest.raises(QQLSyntaxError):
+            parse("RECOMMEND FROM notes POSITIVE IDS () LIMIT 5")
 
 
 class TestErrors:

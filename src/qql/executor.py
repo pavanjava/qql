@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 import uuid
 from dataclasses import dataclass
 from typing import Any
@@ -13,6 +14,7 @@ from qdrant_client.models import (
     Filter,
     Fusion,
     FusionQuery,
+    HasIdCondition,
     IsEmptyCondition,
     IsNullCondition,
     MatchAny,
@@ -26,6 +28,9 @@ from qdrant_client.models import (
     PointStruct,
     Prefetch,
     Range,
+    RecommendInput,
+    RecommendQuery,
+    RecommendStrategy,
     SearchParams,
     SparseVector,
     SparseVectorParams,
@@ -54,6 +59,7 @@ from .ast_nodes import (
     NotExpr,
     NotInExpr,
     OrExpr,
+    RecommendStmt,
     SearchStmt,
     SearchWith,
     ShowCollectionsStmt,
@@ -62,6 +68,8 @@ from .config import QQLConfig
 from .embedder import CrossEncoderEmbedder, Embedder, SparseEmbedder
 
 _RERANK_FETCH_MULTIPLIER = 4
+_COLLECTION_VISIBILITY_TIMEOUT_SECONDS = 5.0
+_COLLECTION_VISIBILITY_POLL_SECONDS = 0.05
 from .exceptions import QQLRuntimeError
 
 
@@ -90,6 +98,8 @@ class Executor:
             return self._execute_show(node)
         if isinstance(node, SearchStmt):
             return self._execute_search(node)
+        if isinstance(node, RecommendStmt):
+            return self._execute_recommend(node)
         if isinstance(node, DeleteStmt):
             return self._execute_delete(node)
         raise QQLRuntimeError(f"Unknown AST node type: {type(node)}")
@@ -120,7 +130,7 @@ class Executor:
 
             # Auto-create hybrid collection if it doesn't exist yet
             if not self._client.collection_exists(node.collection):
-                self._client.create_collection(
+                self._create_collection_and_wait(
                     collection_name=node.collection,
                     vectors_config={
                         "dense": VectorParams(
@@ -132,15 +142,16 @@ class Executor:
                     },
                 )
 
-            point_id = str(uuid.uuid4())
+            point_id, payload = self._extract_point_id_and_payload(node.values)
             try:
                 self._client.upsert(
                     collection_name=node.collection,
+                    wait=True,
                     points=[
                         PointStruct(
                             id=point_id,
                             vector={"dense": dense_vector, "sparse": sparse_vector},
-                            payload=dict(node.values),
+                            payload=payload,
                         )
                     ],
                 )
@@ -160,12 +171,12 @@ class Executor:
 
         self._ensure_collection(node.collection, len(vector))
 
-        point_id = str(uuid.uuid4())
-        payload = dict(node.values)
+        point_id, payload = self._extract_point_id_and_payload(node.values)
 
         try:
             self._client.upsert(
                 collection_name=node.collection,
+                wait=True,
                 points=[PointStruct(id=point_id, vector=vector, payload=payload)],
             )
         except UnexpectedResponse as e:
@@ -199,23 +210,23 @@ class Executor:
 
             points: list[PointStruct] = []
             for vals in node.values_list:
+                point_id, payload = self._extract_point_id_and_payload(vals)
                 dense_vector = dense_embedder.embed(vals["text"])
                 sparse_obj = sparse_embedder.embed(vals["text"])
                 sparse_vector = SparseVector(
                     indices=sparse_obj["indices"], values=sparse_obj["values"]
                 )
-                point_id = str(uuid.uuid4())
                 points.append(
                     PointStruct(
                         id=point_id,
                         vector={"dense": dense_vector, "sparse": sparse_vector},
-                        payload=dict(vals),
+                        payload=payload,
                     )
                 )
 
             if not self._client.collection_exists(node.collection):
                 first_dense = dense_embedder.embed(node.values_list[0]["text"])
-                self._client.create_collection(
+                self._create_collection_and_wait(
                     collection_name=node.collection,
                     vectors_config={
                         "dense": VectorParams(size=len(first_dense), distance=Distance.COSINE)
@@ -226,7 +237,11 @@ class Executor:
                 )
 
             try:
-                self._client.upsert(collection_name=node.collection, points=points)
+                self._client.upsert(
+                    collection_name=node.collection,
+                    wait=True,
+                    points=points,
+                )
             except UnexpectedResponse as e:
                 raise QQLRuntimeError(f"Qdrant error during INSERT BULK: {e}") from e
 
@@ -242,15 +257,19 @@ class Executor:
         points = []
         for vals in node.values_list:
             vector = embedder.embed(vals["text"])
-            point_id = str(uuid.uuid4())
+            point_id, payload = self._extract_point_id_and_payload(vals)
             points.append(
-                PointStruct(id=point_id, vector=vector, payload=dict(vals))
+                PointStruct(id=point_id, vector=vector, payload=payload)
             )
 
         self._ensure_collection(node.collection, len(points[0].vector))
 
         try:
-            self._client.upsert(collection_name=node.collection, points=points)
+            self._client.upsert(
+                collection_name=node.collection,
+                wait=True,
+                points=points,
+            )
         except UnexpectedResponse as e:
             raise QQLRuntimeError(f"Qdrant error during INSERT BULK: {e}") from e
 
@@ -272,7 +291,7 @@ class Executor:
         if node.hybrid:
             embedder = Embedder(dense_model_name)
             dims = embedder.dimensions
-            self._client.create_collection(
+            self._create_collection_and_wait(
                 collection_name=node.collection,
                 vectors_config={
                     "dense": VectorParams(size=dims, distance=Distance.COSINE)
@@ -292,7 +311,7 @@ class Executor:
         # ── Standard dense-only collection ─────────────────────────────────
         embedder = Embedder(dense_model_name)
         dims = embedder.dimensions
-        self._client.create_collection(
+        self._create_collection_and_wait(
             collection_name=node.collection,
             vectors_config=VectorParams(size=dims, distance=Distance.COSINE),
         )
@@ -470,6 +489,47 @@ class Executor:
             data=results,
         )
 
+    def _execute_recommend(self, node: RecommendStmt) -> ExecutionResult:
+        if not self._client.collection_exists(node.collection):
+            raise QQLRuntimeError(f"Collection '{node.collection}' does not exist")
+
+        qdrant_filter: Filter | None = None
+        if node.query_filter is not None:
+            qdrant_filter = self._wrap_as_filter(
+                self._build_qdrant_filter(node.query_filter)
+            )
+        qdrant_filter = self._exclude_ids_from_filter(
+            qdrant_filter,
+            [*node.positive_ids, *node.negative_ids],
+        )
+
+        recommend_input = RecommendInput(
+            positive=list(node.positive_ids),
+            negative=list(node.negative_ids) or None,
+            strategy=self._parse_recommend_strategy(node.strategy),
+        )
+
+        try:
+            response = self._client.query_points(
+                collection_name=node.collection,
+                query=RecommendQuery(recommend=recommend_input),
+                limit=node.limit,
+                query_filter=qdrant_filter,
+            )
+        except UnexpectedResponse as e:
+            raise QQLRuntimeError(f"Qdrant error during RECOMMEND: {e}") from e
+
+        results = [
+            {"id": str(h.id), "score": round(h.score, 4), "payload": h.payload}
+            for h in response.points
+        ]
+
+        return ExecutionResult(
+            success=True,
+            message=f"Found {len(results)} recommendation(s)",
+            data=results,
+        )
+
     def _build_search_params(self, with_clause: SearchWith | None) -> SearchParams | None:
         if with_clause is None:
             return None
@@ -477,6 +537,68 @@ class Executor:
             hnsw_ef=with_clause.hnsw_ef,
             exact=with_clause.exact,
             acorn=AcornSearchParams(enable=True) if with_clause.acorn else None,
+        )
+
+    def _parse_recommend_strategy(
+        self, strategy: str | None
+    ) -> RecommendStrategy | None:
+        if strategy is None:
+            return None
+        try:
+            return RecommendStrategy(strategy)
+        except ValueError as e:
+            raise QQLRuntimeError(
+                "Unknown recommend strategy "
+                f"'{strategy}'. Expected one of: average_vector, best_score, sum_scores"
+            ) from e
+
+    def _exclude_ids_from_filter(
+        self,
+        query_filter: Filter | None,
+        point_ids: list[str | int],
+    ) -> Filter | None:
+        if not point_ids:
+            return query_filter
+
+        exclude_condition = HasIdCondition(has_id=point_ids)
+        if query_filter is None:
+            return Filter(must_not=[exclude_condition])
+
+        return Filter(
+            must=list(query_filter.must or []),
+            should=list(query_filter.should or []),
+            must_not=[*(query_filter.must_not or []), exclude_condition],
+            min_should=query_filter.min_should,
+        )
+
+    def _extract_point_id_and_payload(
+        self, values: dict[str, Any]
+    ) -> tuple[str | int, dict[str, Any]]:
+        payload = dict(values)
+        if "id" not in payload:
+            return str(uuid.uuid4()), payload
+
+        point_id = payload.pop("id")
+        if isinstance(point_id, bool):
+            raise QQLRuntimeError(
+                "INSERT id must be an unsigned integer or UUID string when provided"
+            )
+        if isinstance(point_id, int):
+            if point_id < 0:
+                raise QQLRuntimeError(
+                    "INSERT id must be an unsigned integer or UUID string when provided"
+                )
+            return point_id, payload
+        if isinstance(point_id, str):
+            try:
+                uuid.UUID(point_id)
+            except ValueError as e:
+                raise QQLRuntimeError(
+                    "INSERT id must be an unsigned integer or UUID string when provided"
+                ) from e
+            return point_id, payload
+        raise QQLRuntimeError(
+            "INSERT id must be an unsigned integer or UUID string when provided"
         )
 
     def _get_dense_vector_name(self, collection_name: str) -> str | None:
@@ -516,6 +638,7 @@ class Executor:
         try:
             self._client.delete(
                 collection_name=node.collection,
+                wait=True,
                 points_selector=PointIdsList(points=[node.point_id]),
             )
         except UnexpectedResponse as e:
@@ -651,7 +774,21 @@ class Executor:
                         f"Specify a compatible model with USING MODEL '<model>'."
                     )
         else:
-            self._client.create_collection(
+            self._create_collection_and_wait(
                 collection_name=name,
                 vectors_config=VectorParams(size=vector_size, distance=Distance.COSINE),
             )
+
+    def _create_collection_and_wait(self, **kwargs: Any) -> None:
+        collection_name = kwargs["collection_name"]
+        self._client.create_collection(**kwargs)
+
+        deadline = time.monotonic() + _COLLECTION_VISIBILITY_TIMEOUT_SECONDS
+        while time.monotonic() < deadline:
+            if self._client.collection_exists(collection_name):
+                return
+            time.sleep(_COLLECTION_VISIBILITY_POLL_SECONDS)
+
+        raise QQLRuntimeError(
+            f"Collection '{collection_name}' was created but did not become visible in time"
+        )

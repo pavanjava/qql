@@ -6,6 +6,7 @@ from qql.ast_nodes import (
     DropCollectionStmt,
     InsertBulkStmt,
     InsertStmt,
+    RecommendStmt,
     SearchStmt,
     SearchWith,
     ShowCollectionsStmt,
@@ -28,6 +29,16 @@ def cfg():
 def mock_client(mocker):
     client = mocker.MagicMock()
     client.collection_exists.return_value = False
+    state = {"exists": False}
+
+    def collection_exists(_name):
+        return state["exists"] or bool(client.collection_exists.return_value)
+
+    def create_collection(**_kwargs):
+        state["exists"] = True
+
+    client.collection_exists.side_effect = collection_exists
+    client.create_collection.side_effect = create_collection
     return client
 
 
@@ -71,6 +82,46 @@ class TestInsert:
         result = executor.execute(node)
         assert result.data["id"] is not None
         assert len(result.data["id"]) == 36  # UUID format
+
+    def test_insert_uses_explicit_uuid_id_when_provided(self, executor, mock_client):
+        node = InsertStmt(
+            collection="notes",
+            values={"id": "550e8400-e29b-41d4-a716-446655440000", "text": "hello"},
+            model=None,
+        )
+        result = executor.execute(node)
+        point = mock_client.upsert.call_args.kwargs["points"][0]
+        assert point.id == "550e8400-e29b-41d4-a716-446655440000"
+        assert "id" not in point.payload
+        assert result.data["id"] == "550e8400-e29b-41d4-a716-446655440000"
+
+    def test_insert_uses_explicit_integer_id_when_provided(self, executor, mock_client):
+        node = InsertStmt(
+            collection="notes",
+            values={"id": 42, "text": "hello"},
+            model=None,
+        )
+        executor.execute(node)
+        point = mock_client.upsert.call_args.kwargs["points"][0]
+        assert point.id == 42
+
+    def test_insert_rejects_non_scalar_id(self, executor):
+        node = InsertStmt(
+            collection="notes",
+            values={"id": {"bad": "id"}, "text": "hello"},
+            model=None,
+        )
+        with pytest.raises(QQLRuntimeError, match="unsigned integer or UUID string"):
+            executor.execute(node)
+
+    def test_insert_rejects_non_uuid_string_id(self, executor):
+        node = InsertStmt(
+            collection="notes",
+            values={"id": "note-1", "text": "hello"},
+            model=None,
+        )
+        with pytest.raises(QQLRuntimeError, match="unsigned integer or UUID string"):
+            executor.execute(node)
 
     def test_insert_stores_text_in_payload(self, executor, mock_client):
         node = InsertStmt(collection="notes", values={"text": "hello"}, model=None)
@@ -156,6 +207,20 @@ class TestInsertBulk:
         assert result.success is True
         assert "2" in result.message
         assert "points" in result.message
+
+    def test_bulk_insert_preserves_explicit_ids(self, executor, mock_client):
+        node = InsertBulkStmt(
+            collection="col",
+            values_list=(
+                {"id": "550e8400-e29b-41d4-a716-446655440001", "text": "a"},
+                {"id": 2, "text": "b"},
+            ),
+            model=None,
+        )
+        executor.execute(node)
+        points = mock_client.upsert.call_args.kwargs["points"]
+        assert [point.id for point in points] == ["550e8400-e29b-41d4-a716-446655440001", 2]
+        assert all("id" not in point.payload for point in points)
 
     def test_single_insert_unaffected_by_bulk_dispatch(self, executor, mock_client):
         """Ensure single INSERT still routes correctly after bulk dispatch added."""
@@ -349,6 +414,107 @@ class TestSearch:
         executor.execute(node)
 
         assert mock_client.query_points.call_args.kwargs["using"] == "dense"
+
+
+class TestRecommend:
+    def test_recommend_calls_qdrant_query_points(self, executor, mock_client, mocker):
+        from qdrant_client.models import RecommendQuery
+
+        mock_client.collection_exists.return_value = True
+        mock_response = mocker.MagicMock()
+        mock_response.points = []
+        mock_client.query_points.return_value = mock_response
+
+        node = RecommendStmt(collection="notes", positive_ids=("a",), limit=5)
+        result = executor.execute(node)
+
+        mock_client.query_points.assert_called_once()
+        assert isinstance(mock_client.query_points.call_args.kwargs["query"], RecommendQuery)
+        assert result.success is True
+        assert "recommendation" in result.message
+
+    def test_recommend_excludes_seed_ids_from_results_filter(
+        self, executor, mock_client, mocker
+    ):
+        from qdrant_client.models import Filter, HasIdCondition
+
+        mock_client.collection_exists.return_value = True
+        mock_response = mocker.MagicMock()
+        mock_response.points = []
+        mock_client.query_points.return_value = mock_response
+
+        node = RecommendStmt(
+            collection="notes",
+            positive_ids=("a", 2),
+            negative_ids=("x",),
+            limit=5,
+        )
+        executor.execute(node)
+
+        query_filter = mock_client.query_points.call_args.kwargs["query_filter"]
+        assert isinstance(query_filter, Filter)
+        assert isinstance(query_filter.must_not[0], HasIdCondition)
+        assert query_filter.must_not[0].has_id == ["a", 2, "x"]
+
+    def test_recommend_merges_where_filter_with_seed_exclusion(
+        self, executor, mock_client, mocker
+    ):
+        from qdrant_client.models import Filter
+        from qql.ast_nodes import CompareExpr
+
+        mock_client.collection_exists.return_value = True
+        mock_response = mocker.MagicMock()
+        mock_response.points = []
+        mock_client.query_points.return_value = mock_response
+
+        node = RecommendStmt(
+            collection="notes",
+            positive_ids=("a",),
+            limit=5,
+            query_filter=CompareExpr(field="year", op=">", value=2020),
+        )
+        executor.execute(node)
+
+        query_filter = mock_client.query_points.call_args.kwargs["query_filter"]
+        assert isinstance(query_filter, Filter)
+        assert query_filter.must is not None
+        assert query_filter.must_not is not None
+
+    def test_recommend_forwards_strategy(self, executor, mock_client, mocker):
+        from qdrant_client.models import RecommendStrategy
+
+        mock_client.collection_exists.return_value = True
+        mock_response = mocker.MagicMock()
+        mock_response.points = []
+        mock_client.query_points.return_value = mock_response
+
+        node = RecommendStmt(
+            collection="notes",
+            positive_ids=("a",),
+            limit=5,
+            strategy="best_score",
+        )
+        executor.execute(node)
+
+        recommend = mock_client.query_points.call_args.kwargs["query"].recommend
+        assert recommend.strategy == RecommendStrategy.BEST_SCORE
+
+    def test_recommend_invalid_strategy_raises(self, executor, mock_client):
+        mock_client.collection_exists.return_value = True
+        node = RecommendStmt(
+            collection="notes",
+            positive_ids=("a",),
+            limit=5,
+            strategy="not-a-strategy",
+        )
+        with pytest.raises(QQLRuntimeError, match="Unknown recommend strategy"):
+            executor.execute(node)
+
+    def test_recommend_nonexistent_collection_raises(self, executor, mock_client):
+        mock_client.collection_exists.return_value = False
+        node = RecommendStmt(collection="ghost", positive_ids=("a",), limit=5)
+        with pytest.raises(QQLRuntimeError, match="does not exist"):
+            executor.execute(node)
 
 
 class TestDelete:

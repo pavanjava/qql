@@ -22,6 +22,7 @@ from .ast_nodes import (
     NotExpr,
     NotInExpr,
     OrExpr,
+    RecommendStmt,
     SearchStmt,
     SearchWith,
     ShowCollectionsStmt,
@@ -59,6 +60,8 @@ class Parser:
             node = self._parse_show()
         elif tok.kind == TokenKind.SEARCH:
             node = self._parse_search()
+        elif tok.kind == TokenKind.RECOMMEND:
+            node = self._parse_recommend()
         elif tok.kind == TokenKind.DELETE:
             node = self._parse_delete()
         else:
@@ -275,6 +278,42 @@ class Parser:
             with_clause=with_clause,
         )
 
+    def _parse_recommend(self) -> RecommendStmt:
+        self._expect(TokenKind.RECOMMEND)
+        self._expect(TokenKind.FROM)
+        collection = self._parse_identifier()
+        self._expect(TokenKind.POSITIVE)
+        self._expect(TokenKind.IDS)
+        positive_ids = self._parse_point_id_list()
+
+        negative_ids: tuple[str | int, ...] = ()
+        if self._peek().kind == TokenKind.NEGATIVE:
+            self._advance()
+            self._expect(TokenKind.IDS)
+            negative_ids = self._parse_point_id_list()
+
+        strategy: str | None = None
+        if self._peek().kind == TokenKind.STRATEGY:
+            self._advance()
+            strategy = self._expect(TokenKind.STRING).value
+
+        self._expect(TokenKind.LIMIT)
+        limit = int(self._expect(TokenKind.INTEGER).value)
+
+        query_filter: FilterExpr | None = None
+        if self._peek().kind == TokenKind.WHERE:
+            self._advance()
+            query_filter = self._parse_filter_expr()
+
+        return RecommendStmt(
+            collection=collection,
+            positive_ids=positive_ids,
+            negative_ids=negative_ids,
+            limit=limit,
+            strategy=strategy,
+            query_filter=query_filter,
+        )
+
     def _parse_delete(self) -> DeleteStmt:
         self._expect(TokenKind.DELETE)
         self._expect(TokenKind.FROM)
@@ -471,6 +510,33 @@ class Parser:
                 break
         self._expect(TokenKind.RPAREN)
         return items
+
+    def _parse_point_id_list(self) -> tuple[str | int, ...]:
+        self._expect(TokenKind.LPAREN)
+        items: list[str | int] = []
+        if self._peek().kind == TokenKind.RPAREN:
+            raise QQLSyntaxError("Expected at least one point id", self._peek().pos)
+        while True:
+            tok = self._peek()
+            if tok.kind == TokenKind.STRING:
+                self._advance()
+                items.append(tok.value)
+            elif tok.kind == TokenKind.INTEGER:
+                self._advance()
+                items.append(int(tok.value))
+            else:
+                raise QQLSyntaxError(
+                    f"Expected string or integer point id, got '{tok.value}'",
+                    tok.pos,
+                )
+            if self._peek().kind == TokenKind.COMMA:
+                self._advance()
+                if self._peek().kind == TokenKind.RPAREN:
+                    break
+            else:
+                break
+        self._expect(TokenKind.RPAREN)
+        return tuple(items)
 
     # ── Dict / value parsers (for INSERT VALUES) ──────────────────────────
 

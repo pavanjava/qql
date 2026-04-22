@@ -25,6 +25,11 @@ class TokenKind(Enum):
     SHOW = auto()
     COLLECTIONS = auto()
     SEARCH = auto()
+    RECOMMEND = auto()
+    POSITIVE = auto()
+    NEGATIVE = auto()
+    IDS = auto()
+    STRATEGY = auto()
     SIMILAR = auto()
     TO = auto()
     LIMIT = auto()
@@ -90,6 +95,11 @@ _KEYWORDS: dict[str, TokenKind] = {
     "SHOW": TokenKind.SHOW,
     "COLLECTIONS": TokenKind.COLLECTIONS,
     "SEARCH": TokenKind.SEARCH,
+    "RECOMMEND": TokenKind.RECOMMEND,
+    "POSITIVE": TokenKind.POSITIVE,
+    "NEGATIVE": TokenKind.NEGATIVE,
+    "IDS": TokenKind.IDS,
+    "STRATEGY": TokenKind.STRATEGY,
     "SIMILAR": TokenKind.SIMILAR,
     "TO": TokenKind.TO,
     "LIMIT": TokenKind.LIMIT,

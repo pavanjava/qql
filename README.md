@@ -37,6 +37,7 @@ qql> SEARCH notes SIMILAR TO 'vector databases' LIMIT 5 USING HYBRID RERANK
   - [INSERT — add a point](#insert--add-a-point)
   - [INSERT BULK — batch insert](#insert-bulk--batch-insert-multiple-points)
   - [SEARCH — find similar points](#search--find-similar-points)
+  - [RECOMMEND — retrieve by example IDs](#recommend--retrieve-by-example-ids)
   - [Query-Time Search Params (`EXACT`, `WITH`)](#query-time-search-params-exact-with)
   - [WHERE Clause Filters](#where-clause-filters)
   - [Hybrid Search (USING HYBRID)](#hybrid-search-using-hybrid)
@@ -186,6 +187,8 @@ Inserts a new document into a collection. The `text` field is **mandatory** — 
 
 If the collection does not exist yet, it is **created automatically** with the correct vector dimensions.
 
+If you include an `id` field in `VALUES`, QQL uses it as the Qdrant point ID. Supported explicit IDs are unsigned integers or UUID strings. If you omit `id`, QQL generates a UUID automatically.
+
 **Syntax:**
 ```
 INSERT INTO COLLECTION <collection_name> VALUES {<dict>}
@@ -204,6 +207,7 @@ INSERT INTO COLLECTION articles VALUES {'text': 'Qdrant supports cosine similari
 Insert with metadata:
 ```sql
 INSERT INTO COLLECTION articles VALUES {
+  'id': 1001,
   'text': 'Neural networks learn representations from data',
   'author': 'alice',
   'category': 'ml',
@@ -231,13 +235,13 @@ INSERT INTO COLLECTION articles VALUES {'text': 'hello world'}
 **What happens internally:**
 1. The `text` value is embedded into a dense vector using the configured model.
 2. In hybrid mode, a sparse BM25 vector is also generated.
-3. A UUID is auto-generated as the point ID.
-4. All fields (including `text`) are stored in the payload.
+3. If `id` is provided, it is used as the point ID; otherwise a UUID is auto-generated.
+4. All fields except `id` are stored in the payload.
 5. The point is upserted into Qdrant.
 
 **Rules:**
 - `text` is always required. Omitting it raises an error.
-- A point ID (UUID) is generated automatically — you do not provide one.
+- `id`, when provided, must be an unsigned integer or UUID string.
 - If the collection already exists with a different vector size (from a different model), an error is raised with a clear message.
 - Hybrid inserts require a hybrid collection (created with `CREATE COLLECTION ... HYBRID` or auto-created on first `USING HYBRID` insert).
 
@@ -248,6 +252,8 @@ INSERT INTO COLLECTION articles VALUES {'text': 'hello world'}
 Inserts multiple documents in a single statement. Each item in the array must contain a `"text"` key. All items are embedded and upserted to Qdrant in **one batched call**, which is significantly faster than issuing one `INSERT` per record.
 
 If the collection does not exist yet, it is **created automatically** on the first bulk insert.
+
+Each record may optionally include an `id` field. This is the preferred way to keep seed data deterministic and to make follow-up operations like `RECOMMEND` or `DELETE` reproducible.
 
 **Syntax:**
 ```
@@ -271,9 +277,9 @@ INSERT BULK INTO COLLECTION articles VALUES [
 Bulk insert with metadata:
 ```sql
 INSERT BULK INTO COLLECTION articles VALUES [
-  {'text': 'Attention is all you need', 'author': 'vaswani', 'year': 2017},
-  {'text': 'BERT: Pre-training of deep bidirectional transformers', 'author': 'devlin', 'year': 2018},
-  {'text': 'Language models are few-shot learners', 'author': 'brown', 'year': 2020}
+  {'id': 1001, 'text': 'Attention is all you need', 'author': 'vaswani', 'year': 2017},
+  {'id': 1002, 'text': 'BERT: Pre-training of deep bidirectional transformers', 'author': 'devlin', 'year': 2018},
+  {'id': 1003, 'text': 'Language models are few-shot learners', 'author': 'brown', 'year': 2020}
 ]
 ```
 
@@ -288,7 +294,7 @@ INSERT BULK INTO COLLECTION articles VALUES [
 **Rules:**
 - Every dict in the array must contain a `"text"` key. Missing `text` on any item raises an error with the offending index.
 - An empty array `[]` raises an error.
-- A UUID is auto-generated for each point — you do not provide IDs.
+- `id`, when provided, must be an unsigned integer or UUID string.
 - Supports all the same `USING` clauses as single `INSERT`.
 
 ---
@@ -371,10 +377,54 @@ Results are displayed as a table with three columns:
 ```
 
 - **Score** — similarity score. Higher is more relevant.
-- **ID** — the UUID of the matching point.
+- **ID** — the point ID returned by Qdrant. This may be an integer or a UUID string.
 - **Payload** — all fields stored alongside the vector.
 
 **Important:** Use the same model for SEARCH as you used for INSERT. Mixing models produces meaningless scores because the vectors live in different spaces.
+
+---
+
+### RECOMMEND — retrieve by example IDs
+
+Performs a Qdrant recommendation query using existing point IDs as positive and optional negative examples.
+
+This is useful when you already know which stored points represent the kind of result you want. Qdrant uses those examples to retrieve nearby points, and QQL automatically excludes the seed IDs from the results.
+
+**Syntax:**
+```sql
+RECOMMEND FROM <collection_name> POSITIVE IDS (1001, 1002) LIMIT <n>
+RECOMMEND FROM <collection_name> POSITIVE IDS (1001, 1002) NEGATIVE IDS (1003) LIMIT <n>
+RECOMMEND FROM <collection_name> POSITIVE IDS (1001) STRATEGY 'best_score' LIMIT <n>
+RECOMMEND FROM <collection_name> POSITIVE IDS (1001) LIMIT <n> WHERE <filter>
+```
+
+**Examples:**
+
+Recommend more results like two known articles:
+```sql
+RECOMMEND FROM articles POSITIVE IDS (1001, 1002) LIMIT 5
+```
+
+Recommend similar results while steering away from one bad example:
+```sql
+RECOMMEND FROM articles POSITIVE IDS (1001, 1002) NEGATIVE IDS (1009) LIMIT 5
+```
+
+Use Qdrant's `best_score` recommendation strategy:
+```sql
+RECOMMEND FROM articles POSITIVE IDS (1001) STRATEGY 'best_score' LIMIT 10
+```
+
+Recommend only within a filtered subset:
+```sql
+RECOMMEND FROM articles POSITIVE IDS (1001) LIMIT 5 WHERE year >= 2020 AND status = 'published'
+```
+
+**Supported strategies:**
+
+- `average_vector`
+- `best_score`
+- `sum_scores`
 
 ---
 
@@ -818,7 +868,7 @@ Raises an error if the collection does not exist.
 
 ### DELETE — remove a point
 
-Deletes a single point from a collection by its ID. The point ID is the UUID returned by INSERT.
+Deletes a single point from a collection by its ID. The ID may be an integer or a UUID string, either generated by QQL or supplied explicitly on INSERT.
 
 **Syntax:**
 ```
@@ -890,8 +940,13 @@ SHOW COLLECTIONS
 **Rules:**
 - `--` to end-of-line is a comment and is ignored (inline or full-line)
 - Statements can span multiple lines (e.g. `INSERT BULK ... VALUES [...]`)
+- `RECOMMEND` statements work in `.qql` files the same way they do in the REPL
 - Blank lines between statements are ignored
 - By default all statements run even if one fails; use `--stop-on-error` to halt early
+
+**Included examples:**
+- [`resources/sample.qql`](resources/sample.qql) seeds the demo medical dataset
+- [`resources/sample_v2.qql`](resources/sample_v2.qql) is a compact end-to-end example with explicit IDs and runnable `RECOMMEND` statements
 
 **Example output:**
 ```
@@ -1165,15 +1220,15 @@ result = run_query(
     "INSERT INTO COLLECTION notes VALUES {'text': 'hello world', 'author': 'alice', 'year': 2024}",
     url="http://localhost:6333",
 )
-print(result.message)   # "Inserted 1 point [<uuid>]"
-print(result.data)      # {"id": "...", "collection": "notes"}
+print(result.message)   # "Inserted 1 point [<id>]"
+print(result.data)      # {"id": 1001 or "<uuid>", "collection": "notes"}
 
 # Insert with hybrid vectors
 result = run_query(
     "INSERT INTO COLLECTION notes VALUES {'text': 'hello world'} USING HYBRID",
     url="http://localhost:6333",
 )
-print(result.message)   # "Inserted 1 point [<uuid>] (hybrid)"
+print(result.message)   # "Inserted 1 point [<id>] (hybrid)"
 
 # Dense search with WHERE filter
 result = run_query(
@@ -1228,9 +1283,10 @@ class ExecutionResult:
 
 | Operation | `result.data` type |
 |---|---|
-| INSERT (dense) | `{"id": "<uuid>", "collection": "<name>"}` |
-| INSERT (hybrid) | `{"id": "<uuid>", "collection": "<name>"}` |
+| INSERT (dense) | `{"id": int | "<uuid>", "collection": "<name>"}` |
+| INSERT (hybrid) | `{"id": int | "<uuid>", "collection": "<name>"}` |
 | SEARCH | `[{"id": str, "score": float, "payload": dict}, ...]` |
+| RECOMMEND | `[{"id": str, "score": float, "payload": dict}, ...]` |
 | SHOW COLLECTIONS | `["name1", "name2", ...]` |
 | CREATE COLLECTION | `None` |
 | DROP COLLECTION | `None` |
