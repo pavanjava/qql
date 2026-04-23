@@ -169,6 +169,22 @@ class SearchStmt:
     rerank_model: str | None = None         # cross-encoder model; None → CrossEncoderEmbedder.DEFAULT_MODEL
     with_clause: SearchWith | None = None
 
+
+@dataclass(frozen=True)
+class RecommendStmt:
+    collection: str
+    positive_ids: tuple[str | int, ...]
+    negative_ids: tuple[str | int, ...] = ()
+    limit: int = 10
+    strategy: str | None = None
+    query_filter: FilterExpr | None = None
+    offset: int = 0
+    score_threshold: float | None = None
+    with_clause: SearchWith | None = None
+    lookup_from: tuple[str, str | None] | None = None
+    using: str | None = None
+
+
 @dataclass(frozen=True)
 class DeleteStmt:
     collection: str
@@ -183,5 +199,6 @@ ASTNode = (
     | DropCollectionStmt
     | ShowCollectionsStmt
     | SearchStmt
+    | RecommendStmt
     | DeleteStmt
 )

@@ -1,0 +1,124 @@
+-- QQL sample v2
+-- Compact end-to-end showcase for deterministic inserts, search, query-time
+-- params, recommendation, and hybrid retrieval.
+
+SHOW COLLECTIONS
+
+-- Dense collection
+CREATE COLLECTION qql_sample_v2
+
+INSERT BULK INTO COLLECTION qql_sample_v2 VALUES [
+  {
+    'id': 1001,
+    'text': 'STEMI requires emergent revascularization with primary PCI and dual antiplatelet therapy.',
+    'department': 'cardiology',
+    'topic': 'acute_coronary_syndrome',
+    'year': 2024
+  },
+  {
+    'id': 1002,
+    'text': 'Heart failure with reduced ejection fraction is treated with ARNI, beta-blocker, MRA, and SGLT2 inhibitor therapy.',
+    'department': 'cardiology',
+    'topic': 'heart_failure',
+    'year': 2024
+  },
+  {
+    'id': 2001,
+    'text': 'Acute ischemic stroke management includes rapid imaging, alteplase within the treatment window, and thrombectomy in selected patients.',
+    'department': 'neurology',
+    'topic': 'stroke',
+    'year': 2024
+  },
+  {
+    'id': 2002,
+    'text': 'Transient ischemic attack requires urgent secondary prevention and vascular risk stratification.',
+    'department': 'neurology',
+    'topic': 'stroke',
+    'year': 2023
+  },
+  {
+    'id': 2003,
+    'text': 'Secondary stroke prevention includes antiplatelet therapy, statins, blood pressure control, and carotid evaluation when indicated.',
+    'department': 'neurology',
+    'topic': 'stroke_prevention',
+    'year': 2024
+  },
+  {
+    'id': 3001,
+    'text': 'COPD exacerbations are managed with bronchodilators, corticosteroids, and antibiotics when indicated.',
+    'department': 'pulmonology',
+    'topic': 'copd',
+    'year': 2024
+  }
+]
+
+-- Basic dense search
+SEARCH qql_sample_v2 SIMILAR TO 'stroke thrombolysis and thrombectomy' LIMIT 3
+
+-- Dense search with filter
+SEARCH qql_sample_v2 SIMILAR TO 'secondary stroke prevention' LIMIT 3 WHERE department = 'neurology'
+
+-- Query-time search params
+SEARCH qql_sample_v2 SIMILAR TO 'acute coronary syndrome' LIMIT 3 EXACT
+SEARCH qql_sample_v2 SIMILAR TO 'stroke prevention' LIMIT 3 WITH { hnsw_ef: 128 }
+
+-- Recommendation from known example IDs
+RECOMMEND FROM qql_sample_v2
+  POSITIVE IDS (2001)
+  LIMIT 3
+
+RECOMMEND FROM qql_sample_v2
+  POSITIVE IDS (2001, 2002)
+  NEGATIVE IDS (1001)
+  STRATEGY 'best_score'
+  LIMIT 3
+  WHERE department = 'neurology'
+
+-- Recommend with pagination and score threshold
+RECOMMEND FROM qql_sample_v2
+  POSITIVE IDS (2001)
+  LIMIT 5
+  OFFSET 2
+  SCORE THRESHOLD 0.3
+
+-- Recommend with exact KNN baseline
+RECOMMEND FROM qql_sample_v2
+  POSITIVE IDS (2001)
+  LIMIT 3
+  WITH { exact: true }
+
+-- Recommend using sparse vector instead of dense
+RECOMMEND FROM qql_sample_v2_hybrid
+  POSITIVE IDS (4001)
+  LIMIT 3
+  USING 'sparse'
+
+-- Hybrid collection
+CREATE COLLECTION qql_sample_v2_hybrid HYBRID
+
+INSERT BULK INTO COLLECTION qql_sample_v2_hybrid VALUES [
+  {
+    'id': 4001,
+    'text': 'Transformer attention mechanisms improve long-context sequence modeling and retrieval quality.',
+    'domain': 'ml',
+    'year': 2024
+  },
+  {
+    'id': 4002,
+    'text': 'Sparse retrieval with BM25 remains strong for exact terminology and keyword-heavy document search.',
+    'domain': 'ir',
+    'year': 2023
+  },
+  {
+    'id': 4003,
+    'text': 'Hybrid retrieval combines dense semantic matching with sparse keyword search using reciprocal rank fusion.',
+    'domain': 'ir',
+    'year': 2024
+  }
+] USING HYBRID
+
+-- Hybrid and sparse-only search
+SEARCH qql_sample_v2_hybrid SIMILAR TO 'keyword retrieval and bm25' LIMIT 3 USING HYBRID
+SEARCH qql_sample_v2_hybrid SIMILAR TO 'keyword retrieval and bm25' LIMIT 3 USING SPARSE
+
+SHOW COLLECTIONS

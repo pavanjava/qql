@@ -20,10 +20,11 @@ def null_console() -> Console:
     return Console(quiet=True)
 
 
-def _make_record(mocker, payload: dict):
+def _make_record(mocker, payload: dict, point_id="rec-1"):
     """Create a mock Qdrant ScoredPoint / Record with the given payload."""
     rec = mocker.MagicMock()
     rec.payload = payload
+    rec.id = point_id
     return rec
 
 
@@ -52,7 +53,7 @@ def _make_client(mocker, *, exists=True, hybrid=False, points=None, total=None):
     client.count.return_value = cnt
 
     # scroll — single-batch by default
-    records = [mocker.MagicMock(payload=p) for p in points]
+    records = [_make_record(mocker, p, f"id-{i}") for i, p in enumerate(points, 1)]
     client.scroll.return_value = (records, None)
 
     return client
@@ -187,6 +188,13 @@ class TestDumpCollection:
         assert "'active': true" in content
         assert "'score':" in content
 
+    def test_dump_preserves_point_id_in_insert_values(self, tmp_path, mocker):
+        out = str(tmp_path / "dump.qql")
+        client = _make_client(mocker, points=[{"text": "hello"}])
+        dump_collection("col", out, client, null_console(), null_console())
+        content = (tmp_path / "dump.qql").read_text()
+        assert "'id': 'id-1'" in content
+
     def test_batches_multiple_scroll_pages(self, tmp_path, mocker):
         """When scroll returns two pages, two INSERT BULK blocks should be written."""
         out = str(tmp_path / "dump.qql")
@@ -197,8 +205,8 @@ class TestDumpCollection:
         cnt.count = _DUMP_BATCH_SIZE + 1
         client.count.return_value = cnt
 
-        batch1 = [mocker.MagicMock(payload={"text": f"doc {i}"}) for i in range(_DUMP_BATCH_SIZE)]
-        batch2 = [mocker.MagicMock(payload={"text": "last doc"})]
+        batch1 = [_make_record(mocker, {"text": f"doc {i}"}, f"id-{i}") for i in range(_DUMP_BATCH_SIZE)]
+        batch2 = [_make_record(mocker, {"text": "last doc"}, "id-last")]
         # First scroll call returns batch1 with a non-None offset; second returns batch2 + None
         client.scroll.side_effect = [
             (batch1, "some_offset"),

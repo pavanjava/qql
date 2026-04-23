@@ -160,7 +160,9 @@ def dump_collection(
                 if "text" not in payload:
                     skipped += 1
                     continue
-                valid.append(payload)
+                dump_payload = dict(payload)
+                dump_payload["id"] = rec.id
+                valid.append(dump_payload)
 
             if valid:
                 f.write(

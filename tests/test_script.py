@@ -99,6 +99,18 @@ class TestSplitStatements:
         assert chunks[0][0].kind == TokenKind.CREATE
         assert chunks[1][0].kind == TokenKind.DROP
 
+    def test_recommend_starts_new_top_level_statement(self):
+        from qql.lexer import TokenKind
+
+        tokens = tokenize(
+            "SEARCH x SIMILAR TO 'stroke' LIMIT 5\n"
+            "RECOMMEND FROM x POSITIVE IDS ('id-1') LIMIT 3\n"
+            "SHOW COLLECTIONS"
+        )
+        chunks = split_statements(tokens)
+        assert len(chunks) == 3
+        assert chunks[1][0].kind == TokenKind.RECOMMEND
+
 
 # ── run_script ────────────────────────────────────────────────────────────────
 
@@ -174,6 +186,16 @@ class TestRunScript:
         ok, fail = run_script(path, mock_executor, null_console(), null_console())
         assert ok == 1
         assert fail == 0
+
+    def test_recommend_statement_executes_from_script(self, script_file, mock_executor):
+        path = script_file(
+            "SEARCH x SIMILAR TO 'stroke' LIMIT 5\n"
+            "RECOMMEND FROM x POSITIVE IDS ('id-1') LIMIT 3\n"
+        )
+        ok, fail = run_script(path, mock_executor, null_console(), null_console())
+        assert ok == 2
+        assert fail == 0
+        assert mock_executor.execute.call_count == 2
 
     def test_nonexistent_file_returns_failure(self, mock_executor):
         ok, fail = run_script(

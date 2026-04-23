@@ -25,11 +25,13 @@ Available statements:
 
   [yellow]INSERT INTO COLLECTION[/yellow] <name> [yellow]VALUES[/yellow] {[yellow]'text'[/yellow]: '...', ...}
       Insert a point. 'text' is required and auto-vectorized.
+      Optional: include [yellow]'id'[/yellow] in VALUES as an integer or UUID
       Optional: [yellow]USING MODEL[/yellow] '<model>'
       Optional: [yellow]USING HYBRID[/yellow] [DENSE MODEL '<model>'] [SPARSE MODEL '<model>']
 
   [yellow]INSERT BULK INTO COLLECTION[/yellow] <name> [yellow]VALUES[/yellow] [{[yellow]'text'[/yellow]: '...', ...}, ...]
       Batch insert multiple points in a single call. Each dict must contain 'text'.
+      Optional: each dict may include [yellow]'id'[/yellow] as an integer or UUID.
       Supports the same [yellow]USING[/yellow] clauses as INSERT.
 
   [yellow]CREATE COLLECTION[/yellow] <name> [[yellow]HYBRID[/yellow]]
@@ -53,6 +55,13 @@ Available statements:
       Optional: [yellow]EXACT[/yellow]   bypass HNSW and perform exact search
       Optional: [yellow]WITH[/yellow] { hnsw_ef: <int>, exact: <bool>, acorn: <bool> }   search parameters
 
+  [yellow]RECOMMEND FROM[/yellow] <name> [yellow]POSITIVE IDS[/yellow] (<id>, ...)
+      Find points similar to known examples.
+      Optional: [yellow]NEGATIVE IDS[/yellow] (<id>, ...)
+      Optional: [yellow]STRATEGY[/yellow] 'average_vector|best_score|sum_scores'
+      Optional: [yellow]WHERE[/yellow] <filter>
+      Requires: [yellow]LIMIT[/yellow] <n>
+
   [yellow]DELETE FROM[/yellow] <name> [yellow]WHERE id =[/yellow] '<id>'
       Delete a point by its ID.
 
@@ -66,8 +75,8 @@ Script files (in-shell):
       The file can be re-imported with EXECUTE.
 
 Keyboard shortcuts:
-  ← → arrows   move cursor within the current line
-  ↑ ↓ arrows   scroll through command history
+  Left/Right arrows   move cursor within the current line
+  Up/Down arrows   scroll through command history
   Ctrl-A / Ctrl-E   jump to beginning / end of line
   Ctrl-C   cancel current input
   Ctrl-D   exit shell
@@ -215,7 +224,7 @@ def dump(collection: str, output: str) -> None:
     from .dumper import dump_collection
 
     console.print(
-        f"[bold cyan]Dumping:[/bold cyan] '{collection}'  →  {output}\n"
+        f"[bold cyan]Dumping:[/bold cyan] '{collection}'  ->  {output}\n"
     )
     written, skipped = dump_collection(collection, output, client, console, err_console)
 
@@ -315,7 +324,7 @@ def _launch_repl(cfg: QQLConfig) -> None:
                 coll_name, out_path = parts[1], parts[2]
             from .dumper import dump_collection
             console.print(
-                f"[bold cyan]Dumping:[/bold cyan] '{coll_name}'  →  {out_path}\n"
+                f"[bold cyan]Dumping:[/bold cyan] '{coll_name}'  ->  {out_path}\n"
             )
             written, skipped = dump_collection(
                 coll_name, out_path, client, console, err_console
@@ -348,7 +357,7 @@ def _run_and_print(executor: Executor, query: str) -> None:
         err_console.print(f"[bold red]Failed:[/bold red] {result.message}")
         return
 
-    console.print(f"[bold green]✓[/bold green] {result.message}")
+    console.print(f"[bold green]OK[/bold green] {result.message}")
 
     if result.data is None:
         return

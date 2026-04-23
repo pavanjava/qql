@@ -25,6 +25,7 @@ _STMT_STARTERS = {
     TokenKind.DROP,
     TokenKind.SHOW,
     TokenKind.SEARCH,
+    TokenKind.RECOMMEND,
     TokenKind.DELETE,
 }
 
@@ -53,7 +54,8 @@ def split_statements(tokens: list[Token]) -> list[list[Token]]:
     """Split a flat token list into per-statement chunks.
 
     A new chunk begins whenever a statement-starter keyword (INSERT, CREATE,
-    DROP, SHOW, SEARCH, DELETE) is encountered at brace/bracket/paren depth 0.
+    DROP, SHOW, SEARCH, RECOMMEND, DELETE) is encountered at
+    brace/bracket/paren depth 0.
     The EOF sentinel is consumed and never included in any chunk.
     """
     chunks: list[list[Token]] = []
@@ -138,19 +140,19 @@ def run_script(
             node = Parser(chunk + [eof_tok]).parse()
             result = executor.execute(node)
         except QQLError as e:
-            err_console.print(f"  [bold red]✗[/bold red] {e}")
+            err_console.print(f"  [bold red]x[/bold red] {e}")
             failed += 1
             if stop_on_error:
                 break
             continue
         except Exception as e:
-            err_console.print(f"  [bold red]✗ Unexpected error:[/bold red] {e}")
+            err_console.print(f"  [bold red]x Unexpected error:[/bold red] {e}")
             failed += 1
             if stop_on_error:
                 break
             continue
 
-        console.print(f"  [bold green]✓[/bold green] {result.message}")
+        console.print(f"  [bold green]OK[/bold green] {result.message}")
         succeeded += 1
 
     return succeeded, failed
