@@ -5,6 +5,7 @@ from qql.ast_nodes import (
     BetweenExpr,
     CompareExpr,
     CreateCollectionStmt,
+    CreateIndexStmt,
     DeleteStmt,
     DropCollectionStmt,
     InExpr,
@@ -165,6 +166,13 @@ class TestCreate:
         assert isinstance(node, CreateCollectionStmt)
         assert node.collection == "my_col"
 
+    def test_create_index(self):
+        node = parse("CREATE INDEX ON COLLECTION articles FOR category TYPE keyword")
+        assert isinstance(node, CreateIndexStmt)
+        assert node.collection == "articles"
+        assert node.field_name == "category"
+        assert node.schema == "keyword"
+
 
 class TestDrop:
     def test_drop_collection(self):
@@ -199,11 +207,20 @@ class TestDelete:
         assert isinstance(node, DeleteStmt)
         assert node.collection == "notes"
         assert node.point_id == "abc-123"
+        assert node.query_filter is None
 
     def test_delete_by_integer_id(self):
         node = parse("DELETE FROM notes WHERE id = 99")
         assert isinstance(node, DeleteStmt)
         assert node.point_id == 99
+
+    def test_delete_by_filter(self):
+        node = parse("DELETE FROM articles WHERE category = 'archived'")
+        assert isinstance(node, DeleteStmt)
+        assert node.point_id is None
+        assert isinstance(node.query_filter, CompareExpr)
+        assert node.query_filter.field == "category"
+        assert node.query_filter.value == "archived"
 
 
 class TestRecommend:

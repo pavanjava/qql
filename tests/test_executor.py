@@ -2,6 +2,7 @@ import pytest
 
 from qql.ast_nodes import (
     CreateCollectionStmt,
+    CreateIndexStmt,
     DeleteStmt,
     DropCollectionStmt,
     InsertBulkStmt,
@@ -244,6 +245,21 @@ class TestCreate:
         mock_client.create_collection.assert_not_called()
         assert result.success is True
         assert "already exists" in result.message
+
+
+class TestCreateIndex:
+    def test_create_index_calls_qdrant(self, executor, mock_client):
+        mock_client.collection_exists.return_value = True
+        node = CreateIndexStmt(collection="articles", field_name="category", schema="keyword")
+        result = executor.execute(node)
+        mock_client.create_payload_index.assert_called_once()
+        assert result.success is True
+
+    def test_create_index_nonexistent_collection_raises(self, executor, mock_client):
+        mock_client.collection_exists.return_value = False
+        node = CreateIndexStmt(collection="ghost", field_name="category", schema="keyword")
+        with pytest.raises(QQLRuntimeError, match="does not exist"):
+            executor.execute(node)
 
 
 class TestCreateWithModel:
@@ -628,6 +644,20 @@ class TestDelete:
         node = DeleteStmt(collection="notes", point_id="abc-123")
         result = executor.execute(node)
         mock_client.delete.assert_called_once()
+        assert result.success is True
+
+    def test_delete_by_filter_calls_qdrant_delete_with_filter(self, executor, mock_client):
+        from qdrant_client.models import Filter
+        from qql.ast_nodes import CompareExpr
+
+        mock_client.collection_exists.return_value = True
+        node = DeleteStmt(
+            collection="articles",
+            query_filter=CompareExpr(field="category", op="=", value="archived"),
+        )
+        result = executor.execute(node)
+        selector = mock_client.delete.call_args.kwargs["points_selector"]
+        assert isinstance(selector, Filter)
         assert result.success is True
 
     def test_delete_nonexistent_collection_raises(self, executor, mock_client):

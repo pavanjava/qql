@@ -6,6 +6,7 @@ from .ast_nodes import (
     BetweenExpr,
     CompareExpr,
     CreateCollectionStmt,
+    CreateIndexStmt,
     DeleteStmt,
     DropCollectionStmt,
     FilterExpr,
@@ -150,34 +151,45 @@ class Parser:
 
     def _parse_create(self) -> CreateCollectionStmt:
         self._expect(TokenKind.CREATE)
-        self._expect(TokenKind.COLLECTION)
-        collection = self._parse_identifier()
-        hybrid: bool = False
-        model: str | None = None
-
-        if self._peek().kind == TokenKind.HYBRID:
-            # Bare HYBRID shorthand — backward compat
+        if self._peek().kind == TokenKind.COLLECTION:
             self._advance()
-            hybrid = True
-        elif self._peek().kind == TokenKind.USING:
-            self._advance()  # consume USING
+            collection = self._parse_identifier()
+            hybrid: bool = False
+            model: str | None = None
+
             if self._peek().kind == TokenKind.HYBRID:
-                self._advance()  # consume HYBRID
+                # Bare HYBRID shorthand — backward compat
+                self._advance()
                 hybrid = True
-                # Optional DENSE MODEL sub-clause
-                if self._peek().kind == TokenKind.DENSE:
-                    self._advance()  # consume DENSE
+            elif self._peek().kind == TokenKind.USING:
+                self._advance()  # consume USING
+                if self._peek().kind == TokenKind.HYBRID:
+                    self._advance()  # consume HYBRID
+                    hybrid = True
+                    # Optional DENSE MODEL sub-clause
+                    if self._peek().kind == TokenKind.DENSE:
+                        self._advance()  # consume DENSE
+                        self._expect(TokenKind.MODEL)
+                        model = self._expect(TokenKind.STRING).value
+                else:
                     self._expect(TokenKind.MODEL)
                     model = self._expect(TokenKind.STRING).value
-            else:
-                self._expect(TokenKind.MODEL)
-                model = self._expect(TokenKind.STRING).value
 
-        return CreateCollectionStmt(
-            collection=collection,
-            hybrid=hybrid,
-            model=model,
-        )
+            return CreateCollectionStmt(
+                collection=collection,
+                hybrid=hybrid,
+                model=model,
+            )
+
+        self._expect(TokenKind.INDEX)
+        self._expect(TokenKind.ON)
+        self._expect(TokenKind.COLLECTION)
+        collection = self._parse_identifier()
+        self._expect(TokenKind.FOR)
+        field_name = self._parse_field_path()
+        self._expect(TokenKind.TYPE)
+        schema = self._expect(TokenKind.IDENTIFIER).value.lower()
+        return CreateIndexStmt(collection=collection, field_name=field_name, schema=schema)
 
     def _parse_drop(self) -> DropCollectionStmt:
         self._expect(TokenKind.DROP)
@@ -356,20 +368,24 @@ class Parser:
         self._expect(TokenKind.FROM)
         collection = self._parse_identifier()
         self._expect(TokenKind.WHERE)
-        self._expect(TokenKind.ID)
-        self._expect(TokenKind.EQUALS)
-        tok = self._peek()
-        if tok.kind == TokenKind.STRING:
+        if self._peek().kind == TokenKind.ID:
             self._advance()
-            point_id: str | int = tok.value
-        elif tok.kind == TokenKind.INTEGER:
-            self._advance()
-            point_id = int(tok.value)
-        else:
-            raise QQLSyntaxError(
-                f"Expected string or integer for point id, got '{tok.value}'", tok.pos
-            )
-        return DeleteStmt(collection=collection, point_id=point_id)
+            self._expect(TokenKind.EQUALS)
+            tok = self._peek()
+            if tok.kind == TokenKind.STRING:
+                self._advance()
+                point_id: str | int = tok.value
+            elif tok.kind == TokenKind.INTEGER:
+                self._advance()
+                point_id = int(tok.value)
+            else:
+                raise QQLSyntaxError(
+                    f"Expected string or integer for point id, got '{tok.value}'", tok.pos
+                )
+            return DeleteStmt(collection=collection, point_id=point_id)
+
+        query_filter = self._parse_filter_expr()
+        return DeleteStmt(collection=collection, query_filter=query_filter)
 
     # ── WHERE clause filter parsing (precedence: NOT > AND > OR) ─────────
 

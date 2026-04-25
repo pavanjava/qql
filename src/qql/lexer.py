@@ -21,6 +21,8 @@ class TokenKind(Enum):
     WITH = auto()
     ACORN = auto()
     CREATE = auto()
+    INDEX = auto()
+    ON = auto()
     DROP = auto()
     SHOW = auto()
     COLLECTIONS = auto()
@@ -42,6 +44,8 @@ class TokenKind(Enum):
     FROM = auto()
     WHERE = auto()
     ID = auto()
+    FOR = auto()
+    TYPE = auto()
     # ── Filter keywords ───────────────────────────────────────────────────
     AND = auto()
     OR = auto()
@@ -96,6 +100,8 @@ _KEYWORDS: dict[str, TokenKind] = {
     "WITH": TokenKind.WITH,
     "ACORN": TokenKind.ACORN,
     "CREATE": TokenKind.CREATE,
+    "INDEX": TokenKind.INDEX,
+    "ON": TokenKind.ON,
     "DROP": TokenKind.DROP,
     "SHOW": TokenKind.SHOW,
     "COLLECTIONS": TokenKind.COLLECTIONS,
@@ -117,6 +123,8 @@ _KEYWORDS: dict[str, TokenKind] = {
     "FROM": TokenKind.FROM,
     "WHERE": TokenKind.WHERE,
     "ID": TokenKind.ID,
+    "FOR": TokenKind.FOR,
+    "TYPE": TokenKind.TYPE,
     # Filter keywords
     "AND": TokenKind.AND,
     "OR": TokenKind.OR,

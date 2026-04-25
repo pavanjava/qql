@@ -26,6 +26,7 @@ from qdrant_client.models import (
     MatchValue,
     Modifier,
     PayloadField,
+    PayloadSchemaType,
     PointStruct,
     Prefetch,
     Range,
@@ -44,6 +45,7 @@ from .ast_nodes import (
     BetweenExpr,
     CompareExpr,
     CreateCollectionStmt,
+    CreateIndexStmt,
     DeleteStmt,
     DropCollectionStmt,
     FilterExpr,
@@ -93,6 +95,8 @@ class Executor:
             return self._execute_insert(node)
         if isinstance(node, CreateCollectionStmt):
             return self._execute_create(node)
+        if isinstance(node, CreateIndexStmt):
+            return self._execute_create_index(node)
         if isinstance(node, DropCollectionStmt):
             return self._execute_drop(node)
         if isinstance(node, ShowCollectionsStmt):
@@ -319,6 +323,43 @@ class Executor:
         return ExecutionResult(
             success=True,
             message=f"Collection '{node.collection}' created ({dims}-dimensional vectors, cosine distance)",
+        )
+
+    def _execute_create_index(self, node: CreateIndexStmt) -> ExecutionResult:
+        if not self._client.collection_exists(node.collection):
+            raise QQLRuntimeError(f"Collection '{node.collection}' does not exist")
+
+        schema_map = {
+            "keyword": PayloadSchemaType.KEYWORD,
+            "integer": PayloadSchemaType.INTEGER,
+            "float": PayloadSchemaType.FLOAT,
+            "bool": PayloadSchemaType.BOOL,
+            "text": PayloadSchemaType.TEXT,
+            "geo": PayloadSchemaType.GEO,
+            "datetime": PayloadSchemaType.DATETIME,
+        }
+        try:
+            field_schema = schema_map[node.schema]
+        except KeyError as e:
+            raise QQLRuntimeError(
+                "Unknown index type '"
+                f"{node.schema}'. Expected one of: keyword, integer, float, bool, text, geo, datetime"
+            ) from e
+
+        try:
+            self._client.create_payload_index(
+                collection_name=node.collection,
+                field_name=node.field_name,
+                field_schema=field_schema,
+            )
+        except UnexpectedResponse as e:
+            raise QQLRuntimeError(f"Qdrant error during CREATE INDEX: {e}") from e
+
+        return ExecutionResult(
+            success=True,
+            message=(
+                f"Created index on '{node.collection}.{node.field_name}' as '{node.schema}'"
+            ),
         )
 
     def _execute_drop(self, node: DropCollectionStmt) -> ExecutionResult:
@@ -648,9 +689,25 @@ class Executor:
         if not self._client.collection_exists(node.collection):
             raise QQLRuntimeError(f"Collection '{node.collection}' does not exist")
 
-        from qdrant_client.models import PointIdsList
-
         try:
+            if node.query_filter is not None:
+                self._client.delete(
+                    collection_name=node.collection,
+                    wait=True,
+                    points_selector=self._wrap_as_filter(
+                        self._build_qdrant_filter(node.query_filter)
+                    ),
+                )
+                return ExecutionResult(
+                    success=True,
+                    message=f"Deleted points from '{node.collection}' by filter",
+                )
+
+            from qdrant_client.models import PointIdsList
+
+            if node.point_id is None:
+                raise QQLRuntimeError("DELETE requires either a point id or a filter")
+
             self._client.delete(
                 collection_name=node.collection,
                 wait=True,

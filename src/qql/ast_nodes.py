@@ -146,6 +146,13 @@ class CreateCollectionStmt:
 
 
 @dataclass(frozen=True)
+class CreateIndexStmt:
+    collection: str
+    field_name: str
+    schema: str
+
+
+@dataclass(frozen=True)
 class DropCollectionStmt:
     collection: str
 
@@ -188,7 +195,8 @@ class RecommendStmt:
 @dataclass(frozen=True)
 class DeleteStmt:
     collection: str
-    point_id: str | int
+    point_id: str | int | None = None
+    query_filter: FilterExpr | None = None
 
 
 # Union type for all top-level statement nodes
@@ -196,6 +204,7 @@ ASTNode = (
     InsertStmt
     | InsertBulkStmt
     | CreateCollectionStmt
+    | CreateIndexStmt
     | DropCollectionStmt
     | ShowCollectionsStmt
     | SearchStmt
