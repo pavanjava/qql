@@ -151,7 +151,7 @@ class Parser:
             model=model, hybrid=hybrid, sparse_model=sparse_model,
         )
 
-    def _parse_create(self) -> CreateCollectionStmt:
+    def _parse_create(self) -> CreateCollectionStmt | CreateIndexStmt:
         self._expect(TokenKind.CREATE)
         if self._peek().kind == TokenKind.COLLECTION:
             self._advance()
@@ -213,7 +213,13 @@ class Parser:
             always_ram: bool = False
             if self._peek().kind == TokenKind.QUANTILE:
                 self._advance()
-                quantile = float(self._expect(TokenKind.FLOAT).value)
+                quantile_tok = self._peek()
+                quantile = float(self._parse_number())
+                if not 0.0 <= quantile <= 1.0:
+                    raise QQLSyntaxError(
+                        f"QUANTILE must be between 0 and 1 inclusive, got {quantile}",
+                        quantile_tok.pos,
+                    )
             if self._peek().kind == TokenKind.ALWAYS:
                 self._advance()
                 self._expect(TokenKind.RAM)

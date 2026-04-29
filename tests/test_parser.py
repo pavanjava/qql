@@ -928,6 +928,16 @@ class TestQuantizeCreate:
         assert node.quantization.type == QuantizationType.SCALAR
         assert node.quantization.quantile == pytest.approx(0.99)
 
+    def test_scalar_with_quantile_zero(self):
+        node = parse("CREATE COLLECTION articles QUANTIZE SCALAR QUANTILE 0")
+        assert node.quantization.type == QuantizationType.SCALAR
+        assert node.quantization.quantile == pytest.approx(0.0)
+
+    def test_scalar_with_quantile_one(self):
+        node = parse("CREATE COLLECTION articles QUANTIZE SCALAR QUANTILE 1")
+        assert node.quantization.type == QuantizationType.SCALAR
+        assert node.quantization.quantile == pytest.approx(1.0)
+
     def test_scalar_with_always_ram(self):
         node = parse("CREATE COLLECTION articles QUANTIZE SCALAR ALWAYS RAM")
         assert node.quantization.always_ram is True
@@ -1013,3 +1023,11 @@ class TestQuantizeCreate:
     def test_quantize_unknown_type_raises(self):
         with pytest.raises(QQLSyntaxError):
             parse("CREATE COLLECTION articles QUANTIZE FULL")
+
+    def test_scalar_quantile_above_one_raises(self):
+        with pytest.raises(QQLSyntaxError):
+            parse("CREATE COLLECTION articles QUANTIZE SCALAR QUANTILE 1.5")
+
+    def test_scalar_quantile_integer_above_one_raises(self):
+        with pytest.raises(QQLSyntaxError):
+            parse("CREATE COLLECTION articles QUANTIZE SCALAR QUANTILE 2")
