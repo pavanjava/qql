@@ -209,7 +209,7 @@ class Lexer:
                     tokens.append(Token(TokenKind.NOT_EQUALS, "!=", i))
                     i += 2
                 else:
-                    raise QQLSyntaxError(f"Unexpected character '!'", i)
+                    raise QQLSyntaxError("Unexpected character '!'", i)
             elif ch == ">":
                 if i + 1 < n and query[i + 1] == "=":
                     tokens.append(Token(TokenKind.GTE, ">=", i))
