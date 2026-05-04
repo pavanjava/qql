@@ -81,6 +81,7 @@ from .config import QQLConfig
 from .embedder import CrossEncoderEmbedder, Embedder, SparseEmbedder
 
 _RERANK_FETCH_MULTIPLIER = 4
+_HYBRID_PREFETCH_MULTIPLIER = 4
 _COLLECTION_VISIBILITY_TIMEOUT_SECONDS = 5.0
 _COLLECTION_VISIBILITY_POLL_SECONDS = 0.05
 from .exceptions import QQLRuntimeError
@@ -446,13 +447,13 @@ class Executor:
                         Prefetch(
                             query=dense_vector,
                             using="dense",
-                            limit=node.limit * 4,
+                            limit=node.limit * _HYBRID_PREFETCH_MULTIPLIER,
                             params=search_params,
                         ),
                         Prefetch(
                             query=sparse_vector,
                             using="sparse",
-                            limit=node.limit * 4,
+                            limit=node.limit * _HYBRID_PREFETCH_MULTIPLIER,
                             params=search_params,
                         ),
                     ],
