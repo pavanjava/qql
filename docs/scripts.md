@@ -79,6 +79,9 @@ Export every point in a collection to a `.qql` script file. The generated file i
 **CLI usage:**
 ```bash
 qql dump <collection_name> <output.qql>
+
+# Override the default 50 points/INSERT BULK batch
+qql dump <collection_name> <output.qql> --batch-size 200
 ```
 
 **In-shell usage (inside the QQL REPL):**

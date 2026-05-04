@@ -3,7 +3,8 @@
 The generated file contains:
   1. A header comment with metadata
   2. CREATE COLLECTION <name> [HYBRID]
-  3. One INSERT BULK statement per batch of _DUMP_BATCH_SIZE points
+  3. One INSERT BULK statement per batch of *batch_size* points
+     (default _DEFAULT_DUMP_BATCH_SIZE = 50, overridable via the CLI flag)
   4. A footer comment with totals
 
 The file is valid QQL and can be re-executed with ``qql execute <file>``.
@@ -20,7 +21,7 @@ from typing import Any
 from qdrant_client import QdrantClient
 from rich.console import Console
 
-_DUMP_BATCH_SIZE = 50
+_DEFAULT_DUMP_BATCH_SIZE = 50
 
 
 # ── Value serializer ──────────────────────────────────────────────────────────
@@ -81,12 +82,16 @@ def dump_collection(
     client: QdrantClient,
     console: Console,
     err_console: Console,
+    batch_size: int = _DEFAULT_DUMP_BATCH_SIZE,
 ) -> tuple[int, int]:
     """Export every point in *collection* to a .qql script at *output_path*.
 
     Returns ``(points_written, points_skipped)`` counts.
     Points without a ``'text'`` key are skipped and counted in *points_skipped*.
     """
+    if batch_size <= 0:
+        raise ValueError(f"batch_size must be a positive integer, got {batch_size}")
+
     if not client.collection_exists(collection):
         err_console.print(
             f"[bold red]Error:[/bold red] Collection '{collection}' does not exist."
@@ -100,13 +105,13 @@ def dump_collection(
     # ── First pass: count total points for the header ─────────────────────
     count_info = client.count(collection_name=collection, exact=True)
     total_points = count_info.count
-    total_batches = max(1, math.ceil(total_points / _DUMP_BATCH_SIZE))
+    total_batches = max(1, math.ceil(total_points / batch_size))
 
     console.print(
         f"  Collection type : [cyan]{col_type}[/cyan]\n"
         f"  Points          : [cyan]{total_points}[/cyan]\n"
         f"  Batches         : [cyan]{total_batches}[/cyan] "
-        f"([dim]{_DUMP_BATCH_SIZE} points/batch[/dim])\n"
+        f"([dim]{batch_size} points/batch[/dim])\n"
     )
 
     out = Path(output_path)
@@ -140,7 +145,7 @@ def dump_collection(
         while True:
             records, next_offset = client.scroll(
                 collection_name=collection,
-                limit=_DUMP_BATCH_SIZE,
+                limit=batch_size,
                 offset=offset,
                 with_payload=True,
                 with_vectors=False,
@@ -150,7 +155,7 @@ def dump_collection(
                 break
 
             batch_num += 1
-            batch_start = (batch_num - 1) * _DUMP_BATCH_SIZE + 1
+            batch_start = (batch_num - 1) * batch_size + 1
             batch_end = batch_start + len(records) - 1
 
             # Filter points that have a 'text' field

@@ -201,7 +201,14 @@ def execute(file: str, stop_on_error: bool) -> None:
 @main.command()
 @click.argument("collection")
 @click.argument("output", type=click.Path())
-def dump(collection: str, output: str) -> None:
+@click.option(
+    "--batch-size",
+    type=click.IntRange(min=1),
+    default=50,
+    show_default=True,
+    help="Points per INSERT BULK batch in the generated script.",
+)
+def dump(collection: str, output: str, batch_size: int) -> None:
     """Dump a collection to a .qql script file.
 
     OUTPUT is the path for the generated .qql file.
@@ -230,7 +237,9 @@ def dump(collection: str, output: str) -> None:
     console.print(
         f"[bold cyan]Dumping:[/bold cyan] '{collection}'  ->  {output}\n"
     )
-    written, skipped = dump_collection(collection, output, client, console, err_console)
+    written, skipped = dump_collection(
+        collection, output, client, console, err_console, batch_size=batch_size
+    )
 
     if written == 0 and skipped == 0:
         # collection not found — error already printed by dump_collection

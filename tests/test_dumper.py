@@ -5,7 +5,7 @@ import pytest
 from rich.console import Console
 
 from qql.dumper import (
-    _DUMP_BATCH_SIZE,
+    _DEFAULT_DUMP_BATCH_SIZE,
     _is_hybrid,
     _serialize_dict,
     _serialize_value,
@@ -32,7 +32,7 @@ def _make_client(mocker, *, exists=True, hybrid=False, points=None, total=None):
     """Build a mock QdrantClient for dump tests.
 
     *points* is a list of payload dicts.  scroll() returns them all in one
-    batch when len(points) <= _DUMP_BATCH_SIZE, else two batches.
+    batch when len(points) <= _DEFAULT_DUMP_BATCH_SIZE, else two batches.
     """
     points = points or []
     client = mocker.MagicMock()
@@ -202,10 +202,10 @@ class TestDumpCollection:
         client.collection_exists.return_value = True
         client.get_collection.return_value.config.params.vectors = mocker.MagicMock(spec=[])
         cnt = mocker.MagicMock()
-        cnt.count = _DUMP_BATCH_SIZE + 1
+        cnt.count = _DEFAULT_DUMP_BATCH_SIZE + 1
         client.count.return_value = cnt
 
-        batch1 = [_make_record(mocker, {"text": f"doc {i}"}, f"id-{i}") for i in range(_DUMP_BATCH_SIZE)]
+        batch1 = [_make_record(mocker, {"text": f"doc {i}"}, f"id-{i}") for i in range(_DEFAULT_DUMP_BATCH_SIZE)]
         batch2 = [_make_record(mocker, {"text": "last doc"}, "id-last")]
         # First scroll call returns batch1 with a non-None offset; second returns batch2 + None
         client.scroll.side_effect = [
@@ -215,7 +215,7 @@ class TestDumpCollection:
 
         written, skipped = dump_collection("col", out, client, null_console(), null_console())
         content = (tmp_path / "dump.qql").read_text()
-        assert written == _DUMP_BATCH_SIZE + 1
+        assert written == _DEFAULT_DUMP_BATCH_SIZE + 1
         assert content.count("INSERT BULK") == 2
 
     def test_header_contains_collection_name(self, tmp_path, mocker):
@@ -230,3 +230,37 @@ class TestDumpCollection:
         client = _make_client(mocker, points=[{"text": "x"}])
         dump_collection("col", out, client, null_console(), null_console())
         assert (tmp_path / "sub" / "dir" / "dump.qql").exists()
+
+    def test_custom_batch_size_splits_pages(self, tmp_path, mocker):
+        """A batch_size of 2 over 3 points should produce two INSERT BULK blocks."""
+        out = str(tmp_path / "dump.qql")
+        client = mocker.MagicMock()
+        client.collection_exists.return_value = True
+        client.get_collection.return_value.config.params.vectors = mocker.MagicMock(spec=[])
+        cnt = mocker.MagicMock()
+        cnt.count = 3
+        client.count.return_value = cnt
+
+        batch1 = [_make_record(mocker, {"text": f"doc {i}"}, f"id-{i}") for i in range(2)]
+        batch2 = [_make_record(mocker, {"text": "last"}, "id-last")]
+        client.scroll.side_effect = [
+            (batch1, "offset-1"),
+            (batch2, None),
+        ]
+
+        written, _ = dump_collection(
+            "col", out, client, null_console(), null_console(), batch_size=2
+        )
+        content = (tmp_path / "dump.qql").read_text()
+        assert written == 3
+        assert content.count("INSERT BULK") == 2
+        # client.scroll should have been called with limit=2
+        assert client.scroll.call_args_list[0].kwargs["limit"] == 2
+
+    def test_invalid_batch_size_raises(self, tmp_path, mocker):
+        out = str(tmp_path / "dump.qql")
+        client = _make_client(mocker, points=[{"text": "x"}])
+        with pytest.raises(ValueError):
+            dump_collection(
+                "col", out, client, null_console(), null_console(), batch_size=0
+            )
