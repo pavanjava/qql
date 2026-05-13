@@ -181,6 +181,14 @@ class ShowCollectionsStmt:
 
 
 @dataclass(frozen=True)
+class ScrollStmt:
+    collection: str
+    limit: int
+    query_filter: FilterExpr | None = None
+    after: str | int | None = None
+
+
+@dataclass(frozen=True)
 class SearchStmt:
     collection: str
     query_text: str
@@ -225,6 +233,7 @@ ASTNode = (
     | CreateIndexStmt
     | DropCollectionStmt
     | ShowCollectionsStmt
+    | ScrollStmt
     | SearchStmt
     | RecommendStmt
     | DeleteStmt

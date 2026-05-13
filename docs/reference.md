@@ -171,12 +171,13 @@ Expected output: **375 tests passing**.
 | `Connection failed: ...` | Qdrant unreachable at given URL | Check that Qdrant is running and the URL is correct |
 | `INSERT requires a 'text' field in VALUES` | `text` key missing from the VALUES dict | Add `'text': '...'` to your dict |
 | `Vector dimension mismatch: collection '...' expects X dims, but model produces Y dims` | Model used in INSERT differs from the one used to create the collection | Use `USING MODEL` to specify the same model as the collection was created with |
-| `Collection '...' does not exist` | SEARCH / DROP / DELETE on a non-existent collection | Check name spelling or run `SHOW COLLECTIONS` |
+| `Collection '...' does not exist` | SEARCH / SCROLL / DROP / DELETE on a non-existent collection | Check name spelling or run `SHOW COLLECTIONS` |
 | `Unexpected token '...'; expected a QQL statement keyword` | Unrecognized statement | Check the query syntax; QQL does not support SQL SELECT |
 | `Unterminated string literal (at position N)` | A string is missing its closing quote | Close the string with a matching `'` or `"` |
 | `Unexpected character '@' (at position N)` | A character not part of QQL syntax | Remove or quote the offending character |
 | `Expected a filter operator after field '...'` | Unknown operator in WHERE clause | Use one of: `=`, `!=`, `>`, `>=`, `<`, `<=`, `IN`, `NOT IN`, `BETWEEN`, `IS NULL`, `IS NOT NULL`, `IS EMPTY`, `IS NOT EMPTY`, `MATCH` |
 | `Expected ')' ...` | Unclosed parenthesis in WHERE clause | Add the missing `)` to close the group |
 | `Qdrant error during SEARCH: ...` | Hybrid search on a non-hybrid collection, or wrong vector names | Ensure the collection was created with `HYBRID` before using `USING HYBRID` in INSERT/SEARCH |
+| `Qdrant error during SCROLL: ...` | Qdrant rejected scroll request | Verify collection state, filter, and cursor (`AFTER`) value |
 | `Unknown index type '...'` | Invalid schema type in CREATE INDEX | Use one of: `keyword`, `integer`, `float`, `bool`, `text`, `geo`, `datetime` |
 | `Qdrant error during CREATE INDEX: ...` | Qdrant rejected the index creation | Check field name and collection state |

@@ -24,6 +24,7 @@ from qql.ast_nodes import (
     QuantizationConfig,
     QuantizationType,
     RecommendStmt,
+    ScrollStmt,
     SearchStmt,
     SearchWith,
     ShowCollectionsStmt,
@@ -187,6 +188,34 @@ class TestShow:
     def test_show_collections(self):
         node = parse("SHOW COLLECTIONS")
         assert isinstance(node, ShowCollectionsStmt)
+
+
+class TestScroll:
+    def test_scroll_basic(self):
+        node = parse("SCROLL FROM docs LIMIT 50")
+        assert isinstance(node, ScrollStmt)
+        assert node.collection == "docs"
+        assert node.limit == 50
+        assert node.query_filter is None
+        assert node.after is None
+
+    def test_scroll_with_where(self):
+        node = parse("SCROLL FROM docs WHERE year >= 2024 LIMIT 50")
+        assert isinstance(node, ScrollStmt)
+        assert isinstance(node.query_filter, CompareExpr)
+        assert node.query_filter.field == "year"
+        assert node.after is None
+
+    def test_scroll_with_after(self):
+        node = parse("SCROLL FROM docs AFTER 'cursor-id' LIMIT 50")
+        assert isinstance(node, ScrollStmt)
+        assert node.after == "cursor-id"
+
+    def test_scroll_with_where_and_after(self):
+        node = parse("SCROLL FROM docs WHERE year >= 2024 AFTER 42 LIMIT 50")
+        assert isinstance(node, ScrollStmt)
+        assert node.after == 42
+        assert isinstance(node.query_filter, CompareExpr)
 
 
 class TestSearch:

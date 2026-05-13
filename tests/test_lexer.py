@@ -39,6 +39,13 @@ class TestKeywords:
         assert ks[3] == TokenKind.TO
         assert ks[5] == TokenKind.LIMIT
 
+    def test_scroll_keywords(self):
+        ks = kinds("SCROLL FROM docs AFTER 'cursor-id' LIMIT 50")
+        assert ks[0] == TokenKind.SCROLL
+        assert ks[1] == TokenKind.FROM
+        assert TokenKind.AFTER in ks
+        assert TokenKind.LIMIT in ks
+
     def test_delete_keywords(self):
         ks = kinds("DELETE FROM foo WHERE id = 'abc'")
         assert ks[:4] == [TokenKind.DELETE, TokenKind.FROM, TokenKind.IDENTIFIER, TokenKind.WHERE]

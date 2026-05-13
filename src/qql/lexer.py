@@ -35,6 +35,7 @@ class TokenKind(Enum):
     DROP = auto()
     SHOW = auto()
     COLLECTIONS = auto()
+    SCROLL = auto()
     SEARCH = auto()
     RECOMMEND = auto()
     POSITIVE = auto()
@@ -47,6 +48,7 @@ class TokenKind(Enum):
     OFFSET = auto()
     SCORE = auto()
     THRESHOLD = auto()
+    AFTER = auto()
     LOOKUP = auto()
     VECTOR = auto()
     DELETE = auto()
@@ -123,6 +125,7 @@ _KEYWORDS: dict[str, TokenKind] = {
     "DROP": TokenKind.DROP,
     "SHOW": TokenKind.SHOW,
     "COLLECTIONS": TokenKind.COLLECTIONS,
+    "SCROLL": TokenKind.SCROLL,
     "SEARCH": TokenKind.SEARCH,
     "RECOMMEND": TokenKind.RECOMMEND,
     "POSITIVE": TokenKind.POSITIVE,
@@ -135,6 +138,7 @@ _KEYWORDS: dict[str, TokenKind] = {
     "OFFSET": TokenKind.OFFSET,
     "SCORE": TokenKind.SCORE,
     "THRESHOLD": TokenKind.THRESHOLD,
+    "AFTER": TokenKind.AFTER,
     "LOOKUP": TokenKind.LOOKUP,
     "VECTOR": TokenKind.VECTOR,
     "DELETE": TokenKind.DELETE,

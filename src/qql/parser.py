@@ -26,6 +26,7 @@ from .ast_nodes import (
     QuantizationConfig,
     QuantizationType,
     RecommendStmt,
+    ScrollStmt,
     SearchStmt,
     SearchWith,
     ShowCollectionsStmt,
@@ -61,6 +62,8 @@ class Parser:
             node = self._parse_drop()
         elif tok.kind == TokenKind.SHOW:
             node = self._parse_show()
+        elif tok.kind == TokenKind.SCROLL:
+            node = self._parse_scroll()
         elif tok.kind == TokenKind.SEARCH:
             node = self._parse_search()
         elif tok.kind == TokenKind.RECOMMEND:
@@ -288,6 +291,32 @@ class Parser:
         self._expect(TokenKind.COLLECTIONS)
         return ShowCollectionsStmt()
 
+    def _parse_scroll(self) -> ScrollStmt:
+        self._expect(TokenKind.SCROLL)
+        self._expect(TokenKind.FROM)
+        collection = self._parse_identifier()
+
+        query_filter: FilterExpr | None = None
+        after: str | int | None = None
+
+        if self._peek().kind == TokenKind.WHERE:
+            self._advance()
+            query_filter = self._parse_filter_expr()
+
+        if self._peek().kind == TokenKind.AFTER:
+            self._advance()
+            after = self._parse_point_id_value("SCROLL AFTER")
+
+        self._expect(TokenKind.LIMIT)
+        limit = int(self._expect(TokenKind.INTEGER).value)
+
+        return ScrollStmt(
+            collection=collection,
+            limit=limit,
+            query_filter=query_filter,
+            after=after,
+        )
+
     def _parse_search(self) -> SearchStmt:
         self._expect(TokenKind.SEARCH)
         collection = self._parse_identifier()
@@ -457,17 +486,7 @@ class Parser:
         if self._peek().kind == TokenKind.ID:
             self._advance()
             self._expect(TokenKind.EQUALS)
-            tok = self._peek()
-            if tok.kind == TokenKind.STRING:
-                self._advance()
-                point_id: str | int = tok.value
-            elif tok.kind == TokenKind.INTEGER:
-                self._advance()
-                point_id = int(tok.value)
-            else:
-                raise QQLSyntaxError(
-                    f"Expected string or integer for point id, got '{tok.value}'", tok.pos
-                )
+            point_id = self._parse_point_id_value("DELETE")
             return DeleteStmt(collection=collection, point_id=point_id)
 
         query_filter = self._parse_filter_expr()
@@ -693,6 +712,19 @@ class Parser:
                 break
         self._expect(TokenKind.RPAREN)
         return tuple(items)
+
+    def _parse_point_id_value(self, statement: str) -> str | int:
+        tok = self._peek()
+        if tok.kind == TokenKind.STRING:
+            self._advance()
+            return tok.value
+        if tok.kind == TokenKind.INTEGER:
+            self._advance()
+            return int(tok.value)
+        raise QQLSyntaxError(
+            f"{statement} requires a string or integer point id, got '{tok.value}'",
+            tok.pos,
+        )
 
     # ── Dict / value parsers (for INSERT VALUES) ──────────────────────────
 

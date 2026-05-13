@@ -40,6 +40,15 @@ result = run_query(
 for hit in result.data:
     print(hit["score"], hit["payload"])
 
+# Scroll / pagination
+result = run_query(
+    "SCROLL FROM notes LIMIT 2",
+    url="http://localhost:6333",
+)
+for point in result.data["points"]:
+    print(point["id"], point["payload"])
+print(result.data["next_offset"])
+
 # Bulk insert (all records embedded and upserted in one call)
 result = run_query(
     """INSERT BULK INTO COLLECTION notes VALUES [
@@ -112,6 +121,7 @@ class ExecutionResult:
 | INSERT (hybrid) | `{"id": int \| "<uuid>", "collection": "<name>"}` |
 | INSERT BULK | `None` (count in `result.message`) |
 | SEARCH | `[{"id": str, "score": float, "payload": dict}, ...]` |
+| SCROLL | `{"points": [{"id": str, "payload": dict}, ...], "next_offset": str \| None}` |
 | RECOMMEND | `[{"id": str, "score": float, "payload": dict}, ...]` |
 | SHOW COLLECTIONS | `["name1", "name2", ...]` |
 | CREATE COLLECTION | `None` |

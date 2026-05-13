@@ -111,6 +111,18 @@ class TestSplitStatements:
         assert len(chunks) == 3
         assert chunks[1][0].kind == TokenKind.RECOMMEND
 
+    def test_scroll_starts_new_top_level_statement(self):
+        from qql.lexer import TokenKind
+
+        tokens = tokenize(
+            "SHOW COLLECTIONS\n"
+            "SCROLL FROM x LIMIT 10\n"
+            "DROP COLLECTION x"
+        )
+        chunks = split_statements(tokens)
+        assert len(chunks) == 3
+        assert chunks[1][0].kind == TokenKind.SCROLL
+
 
 # ── run_script ────────────────────────────────────────────────────────────────
 

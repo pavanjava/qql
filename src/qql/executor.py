@@ -76,6 +76,7 @@ from .ast_nodes import (
     QuantizationConfig,
     QuantizationType,
     RecommendStmt,
+    ScrollStmt,
     SearchStmt,
     SearchWith,
     ShowCollectionsStmt,
@@ -115,6 +116,8 @@ class Executor:
             return self._execute_drop(node)
         if isinstance(node, ShowCollectionsStmt):
             return self._execute_show(node)
+        if isinstance(node, ScrollStmt):
+            return self._execute_scroll(node)
         if isinstance(node, SearchStmt):
             return self._execute_search(node)
         if isinstance(node, RecommendStmt):
@@ -410,6 +413,38 @@ class Executor:
             success=True,
             message=f"{len(names)} collection(s) found",
             data=names,
+        )
+
+    def _execute_scroll(self, node: ScrollStmt) -> ExecutionResult:
+        if not self._client.collection_exists(node.collection):
+            raise QQLRuntimeError(f"Collection '{node.collection}' does not exist")
+
+        scroll_filter: Filter | None = None
+        if node.query_filter is not None:
+            scroll_filter = self._wrap_as_filter(
+                self._build_qdrant_filter(node.query_filter)
+            )
+
+        try:
+            records, next_offset = self._client.scroll(
+                collection_name=node.collection,
+                scroll_filter=scroll_filter,
+                limit=node.limit,
+                offset=node.after,
+                with_payload=True,
+                with_vectors=False,
+            )
+        except UnexpectedResponse as e:
+            raise QQLRuntimeError(f"Qdrant error during SCROLL: {e}") from e
+
+        points = [
+            {"id": str(rec.id), "payload": rec.payload or {}}
+            for rec in records
+        ]
+        return ExecutionResult(
+            success=True,
+            message=f"Scrolled {len(points)} point(s) from '{node.collection}'",
+            data={"points": points, "next_offset": None if next_offset is None else str(next_offset)},
         )
 
     def _execute_search(self, node: SearchStmt) -> ExecutionResult:

@@ -1,4 +1,4 @@
-# SEARCH, RECOMMEND, Hybrid Search & Reranking
+# SEARCH, SCROLL, RECOMMEND, Hybrid Search & Reranking
 
 ---
 
@@ -95,6 +95,32 @@ SEARCH articles SIMILAR TO 'transformers' LIMIT 10 WITH { hnsw_ef: 256 }
 -- Filtered search with ACORN
 SEARCH articles SIMILAR TO 'RAG' LIMIT 10 WHERE tag = 'li' WITH { acorn: true }
 ```
+
+---
+
+## SCROLL — pagination / browsing
+
+Use `SCROLL` to iterate through points in a collection page by page.
+
+**Syntax:**
+```sql
+SCROLL FROM <collection_name> LIMIT <n>
+SCROLL FROM <collection_name> WHERE <filter> LIMIT <n>
+SCROLL FROM <collection_name> AFTER '<point_id>' LIMIT <n>
+SCROLL FROM <collection_name> WHERE <filter> AFTER <point_id> LIMIT <n>
+```
+
+**Examples:**
+```sql
+SCROLL FROM articles LIMIT 50
+SCROLL FROM articles WHERE year >= 2024 LIMIT 50
+SCROLL FROM articles AFTER 'cursor-id' LIMIT 50
+```
+
+**Behavior:**
+- Returns points in ID order with payloads.
+- Returns a `next_offset` cursor when more points are available.
+- Use `AFTER <next_offset>` to fetch the next page.
 
 ---
 

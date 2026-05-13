@@ -10,6 +10,7 @@ from qql.ast_nodes import (
     QuantizationConfig,
     QuantizationType,
     RecommendStmt,
+    ScrollStmt,
     SearchStmt,
     SearchWith,
     ShowCollectionsStmt,
@@ -355,6 +356,63 @@ class TestShow:
         assert result.success is True
         assert "notes" in result.data
         assert "docs" in result.data
+
+
+class TestScroll:
+    def test_scroll_returns_points_and_next_offset(self, executor, mock_client, mocker):
+        mock_client.collection_exists.return_value = True
+        rec1 = mocker.MagicMock()
+        rec1.id = "a"
+        rec1.payload = {"text": "first"}
+        rec2 = mocker.MagicMock()
+        rec2.id = 2
+        rec2.payload = {"text": "second"}
+        mock_client.scroll.return_value = ([rec1, rec2], "next-1")
+
+        node = ScrollStmt(collection="notes", limit=2)
+        result = executor.execute(node)
+
+        mock_client.scroll.assert_called_once_with(
+            collection_name="notes",
+            scroll_filter=None,
+            limit=2,
+            offset=None,
+            with_payload=True,
+            with_vectors=False,
+        )
+        assert result.success is True
+        assert result.data == {
+            "points": [
+                {"id": "a", "payload": {"text": "first"}},
+                {"id": "2", "payload": {"text": "second"}},
+            ],
+            "next_offset": "next-1",
+        }
+
+    def test_scroll_with_after_and_filter(self, executor, mock_client, mocker):
+        from qql.ast_nodes import CompareExpr
+        from qdrant_client.models import Filter
+
+        mock_client.collection_exists.return_value = True
+        mock_client.scroll.return_value = ([], None)
+
+        node = ScrollStmt(
+            collection="notes",
+            limit=10,
+            after="cursor-id",
+            query_filter=CompareExpr(field="year", op=">=", value=2024),
+        )
+        executor.execute(node)
+
+        kwargs = mock_client.scroll.call_args.kwargs
+        assert kwargs["offset"] == "cursor-id"
+        assert isinstance(kwargs["scroll_filter"], Filter)
+
+    def test_scroll_nonexistent_collection_raises(self, executor, mock_client):
+        mock_client.collection_exists.return_value = False
+        node = ScrollStmt(collection="ghost", limit=5)
+        with pytest.raises(QQLRuntimeError, match="does not exist"):
+            executor.execute(node)
 
 
 class TestSearch:

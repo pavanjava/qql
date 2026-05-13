@@ -24,6 +24,7 @@ _STMT_STARTERS = {
     TokenKind.CREATE,
     TokenKind.DROP,
     TokenKind.SHOW,
+    TokenKind.SCROLL,
     TokenKind.SEARCH,
     TokenKind.RECOMMEND,
     TokenKind.DELETE,
@@ -54,7 +55,7 @@ def split_statements(tokens: list[Token]) -> list[list[Token]]:
     """Split a flat token list into per-statement chunks.
 
     A new chunk begins whenever a statement-starter keyword (INSERT, CREATE,
-    DROP, SHOW, SEARCH, RECOMMEND, DELETE) is encountered at
+    DROP, SHOW, SCROLL, SEARCH, RECOMMEND, DELETE) is encountered at
     brace/bracket/paren depth 0.
     The EOF sentinel is consumed and never included in any chunk.
     """

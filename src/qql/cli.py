@@ -49,6 +49,11 @@ Available statements:
   [yellow]SHOW COLLECTIONS[/yellow]
       List all collections in the connected Qdrant instance.
 
+  [yellow]SCROLL FROM[/yellow] <name> [yellow]LIMIT[/yellow] <n>
+      Paginate points by ID order.
+      Optional: [yellow]WHERE[/yellow] <filter>
+      Optional: [yellow]AFTER[/yellow] '<id>'|<int>
+
   [yellow]SEARCH[/yellow] <name> [yellow]SIMILAR TO[/yellow] '<text>' [yellow]LIMIT[/yellow] <n>
       Semantic search by vector similarity.
       Optional: [yellow]USING MODEL[/yellow] '<model>'
@@ -398,6 +403,20 @@ def _run_and_print(executor: Executor, query: str) -> None:
                 str(hit["payload"]),
             )
         console.print(table)
+        return
+
+    # Pretty-print scroll results
+    if isinstance(result.data, dict) and "points" in result.data and "next_offset" in result.data:
+        points = result.data["points"]
+        if points:
+            table = Table(show_header=True, header_style="bold cyan")
+            table.add_column("ID")
+            table.add_column("Payload")
+            for point in points:
+                table.add_row(point["id"], str(point["payload"]))
+            console.print(table)
+        if result.data["next_offset"] is not None:
+            console.print(f"[dim]next_offset: {result.data['next_offset']}[/dim]")
         return
 
     # Fallback: print data as-is

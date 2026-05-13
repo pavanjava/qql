@@ -138,6 +138,9 @@ SEARCH notes SIMILAR TO 'vector storage engines' LIMIT 3
 -- Filter results
 SEARCH notes SIMILAR TO 'vector databases' LIMIT 5 WHERE year >= 2023
 
+-- Browse with pagination
+SCROLL FROM notes LIMIT 10
+
 -- List all collections
 SHOW COLLECTIONS
 ```
@@ -147,7 +150,7 @@ SHOW COLLECTIONS
 ## Next Steps
 
 - [INSERT / INSERT BULK](insert.md) — adding documents
-- [SEARCH / RECOMMEND / Hybrid / RERANK](search.md) — querying
+- [SEARCH / SCROLL / RECOMMEND / Hybrid / RERANK](search.md) — querying
 - [WHERE Filters](filters.md) — payload filtering
 - [Collections & Quantization](collections.md) — managing collections
 - [Scripts: EXECUTE / DUMP](scripts.md) — automating with script files

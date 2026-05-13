@@ -7,7 +7,7 @@
 [![MIT License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Tests](https://img.shields.io/badge/tests-375%20passing-brightgreen)](tests/)
 
-Write `INSERT`, `SEARCH`, `RECOMMEND`, `DELETE`, and `CREATE COLLECTION` statements instead of Python SDK calls. Supports hybrid dense+sparse vector search, cross-encoder reranking, quantization (scalar, turbo, binary, product), SQL-style `WHERE` filters, script execution, and collection dump/restore.
+Write `INSERT`, `SEARCH`, `SCROLL`, `RECOMMEND`, `DELETE`, and `CREATE COLLECTION` statements instead of Python SDK calls. Supports hybrid dense+sparse vector search, cross-encoder reranking, quantization (scalar, turbo, binary, product), SQL-style `WHERE` filters, script execution, and collection dump/restore.
 
 ```
 qql> INSERT INTO COLLECTION notes VALUES {'text': 'Qdrant is a vector database', 'author': 'alice', 'year': 2024}
@@ -82,7 +82,7 @@ Full documentation lives in the [`docs/`](docs/) folder and at **[pavanjava.gith
 |---|---|
 | [Getting Started](docs/getting-started.md) | Installation, connecting, first queries |
 | [INSERT / INSERT BULK](docs/insert.md) | Adding documents, batch inserts, payload types |
-| [SEARCH / RECOMMEND / Hybrid / RERANK](docs/search.md) | Semantic search, hybrid, reranking, recommendations |
+| [SEARCH / SCROLL / RECOMMEND / Hybrid / RERANK](docs/search.md) | Semantic search, pagination, hybrid, reranking, recommendations |
 | [WHERE Filters](docs/filters.md) | Full SQL-style filter operators |
 | [Collections & Quantization](docs/collections.md) | CREATE, DROP, QUANTIZE (scalar/turbo/binary/product), CREATE INDEX |
 | [Scripts: EXECUTE / DUMP](docs/scripts.md) | Script files, collection backup/restore |
@@ -103,6 +103,11 @@ SEARCH articles SIMILAR TO 'query' LIMIT 10
 SEARCH articles SIMILAR TO 'query' LIMIT 10 WHERE year >= 2020
 SEARCH articles SIMILAR TO 'query' LIMIT 10 USING HYBRID
 SEARCH articles SIMILAR TO 'query' LIMIT 10 USING HYBRID RERANK
+
+-- Scroll
+SCROLL FROM articles LIMIT 50
+SCROLL FROM articles WHERE year >= 2024 LIMIT 50
+SCROLL FROM articles AFTER 'cursor-id' LIMIT 50
 
 -- Recommend
 RECOMMEND FROM articles POSITIVE IDS (1001, 1002) LIMIT 5
