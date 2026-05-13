@@ -43,6 +43,8 @@ _CMP_OPS: dict[TokenKind, str] = {
     TokenKind.LTE:        "<=",
 }
 
+_HYBRID_FUSION_VALUES = {"rrf", "dbsf"}
+
 
 class Parser:
     def __init__(self, tokens: list[Token]) -> None:
@@ -304,6 +306,7 @@ class Parser:
 
         model: str | None = None
         hybrid: bool = False
+        fusion: str | None = None
         sparse_only: bool = False
         sparse_model: str | None = None
         if self._peek().kind == TokenKind.USING:
@@ -311,9 +314,18 @@ class Parser:
             if self._peek().kind == TokenKind.HYBRID:
                 self._advance()  # consume HYBRID
                 hybrid = True
-                # Optional DENSE MODEL and/or SPARSE MODEL sub-clauses, any order
-                while self._peek().kind in (TokenKind.DENSE, TokenKind.SPARSE):
+                # Optional FUSION / DENSE MODEL / SPARSE MODEL sub-clauses, any order.
+                while self._peek().kind in (TokenKind.FUSION, TokenKind.DENSE, TokenKind.SPARSE):
                     sub = self._advance()
+                    if sub.kind == TokenKind.FUSION:
+                        value_tok = self._expect(TokenKind.STRING)
+                        fusion = value_tok.value.lower()
+                        if fusion not in _HYBRID_FUSION_VALUES:
+                            raise QQLSyntaxError(
+                                f"Unsupported hybrid fusion '{value_tok.value}'; expected 'rrf' or 'dbsf'",
+                                value_tok.pos,
+                            )
+                        continue
                     self._expect(TokenKind.MODEL)
                     m = self._expect(TokenKind.STRING).value
                     if sub.kind == TokenKind.DENSE:
@@ -368,6 +380,7 @@ class Parser:
             limit=limit,
             model=model,
             hybrid=hybrid,
+            fusion=fusion,
             sparse_only=sparse_only,
             sparse_model=sparse_model,
             query_filter=query_filter,

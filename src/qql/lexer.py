@@ -14,6 +14,7 @@ class TokenKind(Enum):
     USING = auto()
     MODEL = auto()
     HYBRID = auto()
+    FUSION = auto()
     DENSE = auto()
     SPARSE = auto()
     RERANK = auto()
@@ -102,6 +103,7 @@ _KEYWORDS: dict[str, TokenKind] = {
     "USING": TokenKind.USING,
     "MODEL": TokenKind.MODEL,
     "HYBRID": TokenKind.HYBRID,
+    "FUSION": TokenKind.FUSION,
     "DENSE": TokenKind.DENSE,
     "SPARSE": TokenKind.SPARSE,
     "RERANK": TokenKind.RERANK,

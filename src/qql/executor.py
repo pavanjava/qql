@@ -429,7 +429,7 @@ class Executor:
         # enough material to reorder; only `node.limit` results are returned.
         fetch_limit = node.limit * _RERANK_FETCH_MULTIPLIER if node.rerank else node.limit
 
-        # ── Hybrid SEARCH: prefetch dense+sparse, fuse with RRF ───────────
+        # ── Hybrid SEARCH: prefetch dense+sparse, fuse with the requested strategy ──
         if node.hybrid:
             dense_model = node.model or self._config.default_model
             sparse_model_name = node.sparse_model or SparseEmbedder.DEFAULT_MODEL
@@ -460,7 +460,7 @@ class Executor:
                             params=search_params,
                         ),
                     ],
-                    query=FusionQuery(fusion=Fusion.RRF),
+                    query=FusionQuery(fusion=self._resolve_hybrid_fusion(node.fusion)),
                     limit=fetch_limit,
                     query_filter=qdrant_filter,
                 )
@@ -561,6 +561,15 @@ class Executor:
             success=True,
             message=f"Found {len(results)} result(s)",
             data=results,
+        )
+
+    def _resolve_hybrid_fusion(self, fusion: str | None) -> Fusion:
+        if fusion is None or fusion == "rrf":
+            return Fusion.RRF
+        if fusion == "dbsf":
+            return Fusion.DBSF
+        raise QQLRuntimeError(
+            f"Unsupported hybrid fusion '{fusion}'; expected 'rrf' or 'dbsf'"
         )
 
     def _execute_recommend(self, node: RecommendStmt) -> ExecutionResult:

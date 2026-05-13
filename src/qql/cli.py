@@ -52,7 +52,7 @@ Available statements:
   [yellow]SEARCH[/yellow] <name> [yellow]SIMILAR TO[/yellow] '<text>' [yellow]LIMIT[/yellow] <n>
       Semantic search by vector similarity.
       Optional: [yellow]USING MODEL[/yellow] '<model>'
-      Optional: [yellow]USING HYBRID[/yellow] [DENSE MODEL '<model>'] [SPARSE MODEL '<model>']
+      Optional: [yellow]USING HYBRID[/yellow] [FUSION 'rrf|dbsf'] [DENSE MODEL '<model>'] [SPARSE MODEL '<model>']
       Optional: [yellow]USING SPARSE[/yellow] [MODEL '<model>']   sparse-vector-only search
       Optional: [yellow]WHERE[/yellow] <filter>   (e.g. WHERE year > 2020 AND status = 'ok')
       Optional: [yellow]RERANK[/yellow] [MODEL '<model>']   rerank results with a cross-encoder

@@ -5,7 +5,7 @@
 [![PyPI version](https://img.shields.io/pypi/v/qql-cli?color=blue&label=PyPI)](https://pypi.org/project/qql-cli/)
 [![Python 3.12+](https://img.shields.io/pypi/pyversions/qql-cli)](https://pypi.org/project/qql-cli/)
 [![MIT License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-375%20passing-brightgreen)](tests/)
+[![Tests](https://img.shields.io/badge/tests-405%20passing-brightgreen)](tests/)
 
 Write `INSERT`, `SEARCH`, `RECOMMEND`, `DELETE`, and `CREATE COLLECTION` statements instead of Python SDK calls. Supports hybrid dense+sparse vector search, cross-encoder reranking, quantization (scalar, turbo, binary, product), SQL-style `WHERE` filters, script execution, and collection dump/restore.
 
@@ -48,7 +48,7 @@ Your query string
   Qdrant instance
 ```
 
-When you run `INSERT`, the `text` field is automatically converted into a dense vector using [Fastembed](https://github.com/qdrant/fastembed). In **hybrid mode** (`USING HYBRID`), a sparse BM25 vector is also generated alongside the dense vector, and searches use Qdrant's Reciprocal Rank Fusion (RRF) to merge the results of both retrieval methods.
+When you run `INSERT`, the `text` field is automatically converted into a dense vector using [Fastembed](https://github.com/qdrant/fastembed). In **hybrid mode** (`USING HYBRID`), a sparse BM25 vector is also generated alongside the dense vector, and searches use Qdrant's Reciprocal Rank Fusion (RRF) by default to merge the results of both retrieval methods. You can switch hybrid search to DBSF with `FUSION 'dbsf'`.
 
 ---
 
@@ -102,6 +102,7 @@ INSERT BULK INTO COLLECTION articles VALUES [{'text': '...'}, {'text': '...'}]
 SEARCH articles SIMILAR TO 'query' LIMIT 10
 SEARCH articles SIMILAR TO 'query' LIMIT 10 WHERE year >= 2020
 SEARCH articles SIMILAR TO 'query' LIMIT 10 USING HYBRID
+SEARCH articles SIMILAR TO 'query' LIMIT 10 USING HYBRID FUSION 'dbsf'
 SEARCH articles SIMILAR TO 'query' LIMIT 10 USING HYBRID RERANK
 
 -- Recommend
@@ -137,7 +138,7 @@ Tests do not require a running Qdrant instance — the Qdrant client is mocked.
 pytest tests/ -v
 ```
 
-Expected: **375 tests passing**.
+Expected: **405 tests passing**.
 
 ---
 

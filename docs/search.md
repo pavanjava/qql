@@ -14,7 +14,7 @@ SEARCH <collection_name> SIMILAR TO '<query_text>' LIMIT <n>
 SEARCH <collection_name> SIMILAR TO '<query_text>' LIMIT <n> USING MODEL '<model_name>'
 SEARCH <collection_name> SIMILAR TO '<query_text>' LIMIT <n> [USING MODEL '<model>'] WHERE <filter>
 SEARCH <collection_name> SIMILAR TO '<query_text>' LIMIT <n> USING HYBRID
-SEARCH <collection_name> SIMILAR TO '<query_text>' LIMIT <n> USING HYBRID [DENSE MODEL '<model>'] [SPARSE MODEL '<model>'] [WHERE <filter>]
+SEARCH <collection_name> SIMILAR TO '<query_text>' LIMIT <n> USING HYBRID [FUSION 'rrf|dbsf'] [DENSE MODEL '<model>'] [SPARSE MODEL '<model>'] [WHERE <filter>]
 SEARCH <collection_name> SIMILAR TO '<query_text>' LIMIT <n> USING SPARSE [MODEL '<sparse_model>']
 SEARCH <collection_name> SIMILAR TO '<query_text>' LIMIT <n> EXACT
 SEARCH <collection_name> SIMILAR TO '<query_text>' LIMIT <n> [USING ...] [WHERE <filter>] [RERANK] WITH { hnsw_ef: <n>, exact: true|false, acorn: true|false }
@@ -33,7 +33,7 @@ Search only papers published after 2020:
 SEARCH articles SIMILAR TO 'deep learning' LIMIT 10 WHERE year > 2020
 ```
 
-Hybrid search (combines dense semantic + sparse BM25 keyword retrieval via RRF):
+Hybrid search (combines dense semantic + sparse BM25 keyword retrieval via RRF by default):
 ```sql
 SEARCH articles SIMILAR TO 'attention mechanism' LIMIT 10 USING HYBRID
 ```
@@ -100,13 +100,13 @@ SEARCH articles SIMILAR TO 'RAG' LIMIT 10 WHERE tag = 'li' WITH { acorn: true }
 
 ## Hybrid Search (USING HYBRID)
 
-Hybrid search combines **dense semantic vectors** and **sparse BM25 keyword vectors** in a single query and merges the results with Qdrant's **Reciprocal Rank Fusion (RRF)** algorithm. This typically outperforms either method alone.
+Hybrid search combines **dense semantic vectors** and **sparse BM25 keyword vectors** in a single query. By default QQL merges the two result sets with Qdrant's **Reciprocal Rank Fusion (RRF)** algorithm, and you can optionally switch to **DBSF** with a `FUSION` clause.
 
 ### How it works internally
 
 1. Both a dense vector (`TextEmbedding`) and a sparse BM25 vector (`SparseTextEmbedding`) are generated from your query text.
 2. Qdrant fetches the top candidates from each index independently (`prefetch limit = LIMIT × 4`).
-3. The two result lists are merged using RRF — a rank-based fusion that does not require score normalization.
+3. The two result lists are merged using the selected fusion strategy (`RRF` by default, or `DBSF` when requested).
 4. The final top-N results are returned.
 
 ### Step 1: Create a hybrid collection
@@ -139,6 +139,9 @@ SEARCH articles SIMILAR TO 'transformer architecture' LIMIT 10 USING HYBRID
 -- Hybrid search with a WHERE filter
 SEARCH articles SIMILAR TO 'attention' LIMIT 10 USING HYBRID WHERE year >= 2017
 
+-- Hybrid with DBSF fusion
+SEARCH articles SIMILAR TO 'hybrid retrieval' LIMIT 10 USING HYBRID FUSION 'dbsf'
+
 -- Hybrid with custom dense model
 SEARCH articles SIMILAR TO 'embeddings' LIMIT 5
   USING HYBRID DENSE MODEL 'BAAI/bge-base-en-v1.5'
@@ -154,6 +157,7 @@ SEARCH articles SIMILAR TO 'sparse retrieval' LIMIT 5
 |---|---|
 | Dense model | configured default (`sentence-transformers/all-MiniLM-L6-v2`) |
 | Sparse model | `Qdrant/bm25` |
+| Fusion | `rrf` |
 
 ### Dense vs. hybrid — when to use which
 

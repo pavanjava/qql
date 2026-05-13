@@ -1063,6 +1063,29 @@ class TestHybridSearch:
         assert isinstance(kw["query"], FusionQuery)
         assert kw["query"].fusion == Fusion.RRF
 
+    def test_hybrid_search_uses_dbsf_fusion(
+        self, executor, mock_client, mock_sparse_embedder, mocker
+    ):
+        from qdrant_client.models import Fusion, FusionQuery
+
+        mock_client.collection_exists.return_value = True
+        mock_resp = mocker.MagicMock()
+        mock_resp.points = []
+        mock_client.query_points.return_value = mock_resp
+
+        node = SearchStmt(
+            collection="col",
+            query_text="q",
+            limit=5,
+            model=None,
+            hybrid=True,
+            fusion="dbsf",
+        )
+        executor.execute(node)
+        kw = mock_client.query_points.call_args.kwargs
+        assert isinstance(kw["query"], FusionQuery)
+        assert kw["query"].fusion == Fusion.DBSF
+
     def test_hybrid_search_prefetch_limit_is_4x(
         self, executor, mock_client, mock_sparse_embedder, mocker
     ):

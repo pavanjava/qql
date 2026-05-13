@@ -212,6 +212,10 @@ class TestHybridKeyword:
         ks = kinds("sparse")
         assert ks[0] == TokenKind.SPARSE
 
+    def test_fusion_keyword(self):
+        ks = kinds("FUSION")
+        assert ks[0] == TokenKind.FUSION
+
     def test_hybrid_in_create_statement(self):
         ks = kinds("CREATE COLLECTION articles HYBRID")
         assert ks[3] == TokenKind.HYBRID

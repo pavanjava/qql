@@ -36,6 +36,9 @@ SEARCH docs SIMILAR TO 'hello' LIMIT 5 USING MODEL 'BAAI/bge-small-en-v1.5'
 -- Hybrid with custom dense model
 SEARCH docs SIMILAR TO 'hello' LIMIT 5 USING HYBRID DENSE MODEL 'BAAI/bge-base-en-v1.5'
 
+-- Hybrid with explicit fusion strategy
+SEARCH docs SIMILAR TO 'hello' LIMIT 5 USING HYBRID FUSION 'dbsf'
+
 -- Hybrid with both custom
 SEARCH docs SIMILAR TO 'hello' LIMIT 5
   USING HYBRID DENSE MODEL 'BAAI/bge-base-en-v1.5' SPARSE MODEL 'prithivida/Splade_PP_en_v1'
@@ -159,7 +162,7 @@ Tests do not require a running Qdrant instance — the Qdrant client is mocked.
 pytest tests/ -v
 ```
 
-Expected output: **375 tests passing**.
+Expected output: **405 tests passing**.
 
 ---
 

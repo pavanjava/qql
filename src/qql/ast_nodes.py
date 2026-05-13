@@ -187,6 +187,7 @@ class SearchStmt:
     limit: int
     model: str | None               # dense model; None → use config default
     hybrid: bool = False            # if True, use prefetch+RRF hybrid search
+    fusion: str | None = None       # hybrid fusion strategy; None → default rrf
     sparse_only: bool = False       # if True, query only the sparse vector (no dense)
     sparse_model: str | None = None # sparse model for hybrid/sparse-only; None → SparseEmbedder.DEFAULT_MODEL
     query_filter: FilterExpr | None = None  # optional WHERE clause; default keeps existing tests valid

@@ -704,6 +704,24 @@ class TestHybridSearch:
         assert isinstance(node.query_filter, CompareExpr)
         assert node.query_filter.field == "year"
 
+    def test_search_hybrid_with_dbsf_fusion(self):
+        node = parse(
+            "SEARCH docs SIMILAR TO 'q' LIMIT 10 USING HYBRID FUSION 'dbsf'"
+        )
+        assert node.hybrid is True
+        assert node.fusion == "dbsf"
+
+    def test_search_hybrid_with_fusion_and_models(self):
+        node = parse(
+            "SEARCH docs SIMILAR TO 'q' LIMIT 10 "
+            "USING HYBRID FUSION 'rrf' SPARSE MODEL 'Qdrant/bm25' "
+            "DENSE MODEL 'BAAI/bge-base-en-v1.5'"
+        )
+        assert node.hybrid is True
+        assert node.fusion == "rrf"
+        assert node.sparse_model == "Qdrant/bm25"
+        assert node.model == "BAAI/bge-base-en-v1.5"
+
     def test_search_hybrid_dense_model_and_where(self):
         node = parse(
             "SEARCH articles SIMILAR TO 'ml' LIMIT 10 "
@@ -712,6 +730,10 @@ class TestHybridSearch:
         assert node.hybrid is True
         assert node.model == "BAAI/bge-small-en-v1.5"
         assert isinstance(node.query_filter, CompareExpr)
+
+    def test_search_hybrid_rejects_unknown_fusion(self):
+        with pytest.raises(QQLSyntaxError, match="Unsupported hybrid fusion"):
+            parse("SEARCH docs SIMILAR TO 'q' LIMIT 10 USING HYBRID FUSION 'x'")
 
     def test_search_hybrid_limit_preserved(self):
         node = parse("SEARCH col SIMILAR TO 'q' LIMIT 7 USING HYBRID")
