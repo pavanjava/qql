@@ -4,7 +4,6 @@ from __future__ import annotations
 import pytest
 from rich.console import Console
 
-from qql.ast_nodes import CreateCollectionStmt, InsertBulkStmt
 from qql.exceptions import QQLRuntimeError
 from qql.executor import ExecutionResult
 from qql.lexer import Lexer

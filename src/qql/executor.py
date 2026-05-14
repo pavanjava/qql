@@ -85,12 +85,12 @@ from .ast_nodes import (
 )
 from .config import QQLConfig
 from .embedder import CrossEncoderEmbedder, Embedder, SparseEmbedder
+from .exceptions import QQLRuntimeError
 
 _RERANK_FETCH_MULTIPLIER = 4
 _HYBRID_PREFETCH_MULTIPLIER = 4
 _COLLECTION_VISIBILITY_TIMEOUT_SECONDS = 5.0
 _COLLECTION_VISIBILITY_POLL_SECONDS = 0.05
-from .exceptions import QQLRuntimeError
 
 
 @dataclass
@@ -431,27 +431,31 @@ class Executor:
 
         # ── Vector topology ────────────────────────────────────────────────
         vectors = params.vectors  # type: ignore[union-attr]
+        sparse_vector_params = params.sparse_vectors or {}
         if isinstance(vectors, dict):
-            topology = "hybrid"
             vector_details = {}
             for vname, vconfig in vectors.items():
                 vector_details[vname] = {
                     "size": vconfig.size,
                     "distance": str(vconfig.distance) if vconfig.distance else None,
                 }
+        elif vectors is None:
+            raise QQLRuntimeError(
+                f"Collection '{node.collection}' has no vector configuration"
+            )
         else:
-            topology = "dense"
             vector_details = {
                 "": {
                     "size": vectors.size,
                     "distance": str(vectors.distance) if vectors.distance else None,
                 }
             }
+        topology = "hybrid" if sparse_vector_params else "dense"
 
         # ── Sparse vector config ───────────────────────────────────────────
         sparse_vectors = {}
-        if params.sparse_vectors:
-            for sname, sconfig in params.sparse_vectors.items():
+        if sparse_vector_params:
+            for sname, sconfig in sparse_vector_params.items():
                 sparse_vectors[sname] = {
                     "modifier": str(sconfig.modifier) if sconfig.modifier else None,
                 }
@@ -488,7 +492,7 @@ class Executor:
 
         # ── Payload schema / indexes ───────────────────────────────────────
         payload_indexes = {}
-        for field_name, idx_info in info.payload_schema.items():
+        for field_name, idx_info in (info.payload_schema or {}).items():
             payload_indexes[field_name] = str(idx_info.data_type)
 
         # ── Sharding / replication ─────────────────────────────────────────

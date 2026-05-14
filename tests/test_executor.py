@@ -454,6 +454,45 @@ class TestShowCollection:
         assert data["vectors"]["dense"]["size"] == 768
         assert data["sparse_vectors"]["sparse"]["modifier"] == "idf"
 
+    def test_show_collection_named_dense_is_not_reported_as_hybrid(self, executor, mock_client, mocker):
+        from qdrant_client.models import (
+            CollectionStatus,
+            Distance,
+            VectorParams,
+        )
+
+        mock_client.collection_exists.return_value = True
+
+        mock_info = mocker.MagicMock()
+        mock_info.status = CollectionStatus.GREEN
+        mock_info.points_count = 3
+        mock_info.indexed_vectors_count = 3
+        mock_info.segments_count = 1
+        mock_info.config.params.vectors = {
+            "body": VectorParams(size=384, distance=Distance.COSINE),
+            "title": VectorParams(size=128, distance=Distance.DOT),
+        }
+        mock_info.config.params.sparse_vectors = None
+        mock_info.config.params.shard_number = 1
+        mock_info.config.params.replication_factor = 1
+        mock_info.config.params.write_consistency_factor = 1
+        mock_info.config.hnsw_config.m = 16
+        mock_info.config.hnsw_config.ef_construct = 100
+        mock_info.config.hnsw_config.full_scan_threshold = None
+        mock_info.config.hnsw_config.max_indexing_threads = None
+        mock_info.config.hnsw_config.on_disk = None
+        mock_info.config.hnsw_config.payload_m = None
+        mock_info.config.quantization_config = None
+        mock_info.payload_schema = {}
+
+        mock_client.get_collection.return_value = mock_info
+
+        result = executor.execute(ShowCollectionStmt(collection="named_dense"))
+
+        assert result.success is True
+        assert result.data["topology"] == "dense"
+        assert result.data["sparse_vectors"] is None
+
     def test_show_collection_with_payload_schema(self, executor, mock_client, mocker):
         from qdrant_client.models import (
             CollectionStatus,
@@ -493,6 +532,41 @@ class TestShowCollection:
 
         assert result.success is True
         assert result.data["payload_schema"] == {"category": "keyword"}
+
+    def test_show_collection_handles_missing_payload_schema(self, executor, mock_client, mocker):
+        from qdrant_client.models import (
+            CollectionStatus,
+            Distance,
+            VectorParams,
+        )
+
+        mock_client.collection_exists.return_value = True
+
+        mock_info = mocker.MagicMock()
+        mock_info.status = CollectionStatus.GREEN
+        mock_info.points_count = 0
+        mock_info.indexed_vectors_count = 0
+        mock_info.segments_count = 0
+        mock_info.config.params.vectors = VectorParams(size=384, distance=Distance.COSINE)
+        mock_info.config.params.shard_number = 1
+        mock_info.config.params.replication_factor = 1
+        mock_info.config.params.write_consistency_factor = 1
+        mock_info.config.params.sparse_vectors = None
+        mock_info.config.hnsw_config.m = 16
+        mock_info.config.hnsw_config.ef_construct = 100
+        mock_info.config.hnsw_config.full_scan_threshold = None
+        mock_info.config.hnsw_config.max_indexing_threads = None
+        mock_info.config.hnsw_config.on_disk = None
+        mock_info.config.hnsw_config.payload_m = None
+        mock_info.config.quantization_config = None
+        mock_info.payload_schema = None
+
+        mock_client.get_collection.return_value = mock_info
+
+        result = executor.execute(ShowCollectionStmt(collection="docs"))
+
+        assert result.success is True
+        assert result.data["payload_schema"] is None
 
     def test_show_collection_nonexistent_raises(self, executor, mock_client):
         mock_client.collection_exists.return_value = False
@@ -1227,7 +1301,6 @@ class TestHybridInsert:
         )
         executor.execute(node)
         # Embedder should have been called with the custom dense model name
-        call_args = mocker.patch.object  # already patched by mock_embedder fixture
         # Verify through the dense vector in the upsert call
         point = mock_client.upsert.call_args.kwargs["points"][0]
         assert "dense" in point.vector

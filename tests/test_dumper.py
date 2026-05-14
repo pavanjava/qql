@@ -7,7 +7,6 @@ from rich.console import Console
 from qql.dumper import (
     _DEFAULT_DUMP_BATCH_SIZE,
     _is_hybrid,
-    _serialize_dict,
     _serialize_value,
     dump_collection,
 )

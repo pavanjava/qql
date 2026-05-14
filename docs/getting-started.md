@@ -144,6 +144,9 @@ SCROLL FROM notes LIMIT 10
 -- List all collections
 SHOW COLLECTIONS
 
+-- Inspect one collection's diagnostics
+SHOW COLLECTION notes
+
 -- Retrieve a point by ID
 SELECT * FROM notes WHERE id = 1
 ```

@@ -21,13 +21,11 @@ from qql.ast_nodes import (
     NotExpr,
     NotInExpr,
     OrExpr,
-    QuantizationConfig,
     QuantizationType,
     RecommendStmt,
     SelectStmt,
     ScrollStmt,
     SearchStmt,
-    SearchWith,
     ShowCollectionStmt,
     ShowCollectionsStmt,
 )

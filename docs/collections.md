@@ -24,6 +24,64 @@ SHOW COLLECTIONS
 
 ---
 
+## SHOW COLLECTION — inspect one collection
+
+Returns collection diagnostics for a single collection using Qdrant's collection info.
+
+**Syntax:**
+```sql
+SHOW COLLECTION <collection_name>
+```
+
+**What it shows:**
+
+- Point count
+- Indexed vector count
+- Segment count
+- Vector names, dimensions, and distance metrics
+- Dense vs hybrid topology
+- Sparse vector modifiers when present
+- Quantization mode
+- HNSW configuration
+- Payload indexes detected by Qdrant
+- Shard, replica, and write consistency settings
+
+**Example:**
+```sql
+SHOW COLLECTION research_papers
+```
+
+**Output:**
+```
+OK Collection 'research_papers' diagnostics
+Collection: research_papers
+  Status               : green
+  Points               : 12450
+  Indexed vectors      : 12450
+  Segments             : 3
+  Topology             : hybrid
+  Vector 'dense'       : 768 dims, Cosine distance
+  Sparse 'sparse'      : modifier=idf
+  Quantization         : scalar
+  HNSW M               : 16
+  HNSW ef_construct    : 100
+  Payload indexes:
+    category: keyword
+    year: integer
+  Shards               : 1
+  Replicas             : 1
+  Write consistency    : 1
+```
+
+**Notes:**
+
+- `Topology` is `dense` for standard collections and `hybrid` when sparse vectors are configured alongside dense vectors.
+- Dense collections with named vectors still report their vector names and dimensions.
+- If no payload indexes exist, QQL prints `Payload indexes      : none`.
+- Raises an error if the collection does not exist.
+
+---
+
 ## CREATE COLLECTION — create a collection
 
 Explicitly creates a new empty collection. Collections are also created automatically on the first INSERT, so this command is optional — use it when you want to pre-create a collection before inserting data.

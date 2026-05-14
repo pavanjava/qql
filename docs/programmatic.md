@@ -80,6 +80,15 @@ result = run_query(
     url="http://localhost:6333",
 )
 print(result.message)   # "Deleted N point(s)"
+
+# Inspect collection diagnostics
+result = run_query(
+    "SHOW COLLECTION notes",
+    url="http://localhost:6333",
+)
+print(result.data["topology"])         # "dense" or "hybrid"
+print(result.data["vectors"])          # {"": {...}} or {"dense": {...}, ...}
+print(result.data["payload_schema"])   # {"field": "keyword", ...} or None
 ```
 
 ---
@@ -132,6 +141,7 @@ class ExecutionResult:
 | SCROLL | `{"points": [{"id": str, "payload": dict}, ...], "next_offset": str \| None}` |
 | RECOMMEND | `[{"id": str, "score": float, "payload": dict}, ...]` |
 | SHOW COLLECTIONS | `["name1", "name2", ...]` |
+| SHOW COLLECTION | `{"name": str, "status": str, "points_count": int \| None, "indexed_vectors_count": int \| None, "segments_count": int, "topology": str, "vectors": dict, "sparse_vectors": dict \| None, "quantization": str \| None, "hnsw_config": dict, "payload_schema": dict \| None, "sharding": dict}` |
 | CREATE COLLECTION | `None` |
 | CREATE INDEX | `None` |
 | DROP COLLECTION | `None` |

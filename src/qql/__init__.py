@@ -21,6 +21,7 @@ __all__ = [
     "Executor",
     "Lexer",
     "Parser",
+    "load_config",
     "run_query",
 ]
 

@@ -84,7 +84,7 @@ Full documentation lives in the [`docs/`](docs/) folder and at **[pavanjava.gith
 | [INSERT / INSERT BULK](docs/insert.md) | Adding documents, batch inserts, payload types |
 | [SEARCH / SELECT / SCROLL / RECOMMEND / Hybrid / RERANK](docs/search.md) | Semantic search, point retrieval, pagination, hybrid, reranking, recommendations |
 | [WHERE Filters](docs/filters.md) | Full SQL-style filter operators |
-| [Collections & Quantization](docs/collections.md) | CREATE, DROP, QUANTIZE (scalar/turbo/binary/product), CREATE INDEX |
+| [Collections & Quantization](docs/collections.md) | SHOW, CREATE, DROP, QUANTIZE (scalar/turbo/binary/product), CREATE INDEX |
 | [Scripts: EXECUTE / DUMP](docs/scripts.md) | Script files, collection backup/restore |
 | [Programmatic Usage](docs/programmatic.md) | Use QQL as a Python library |
 | [Reference: Models / Config / Errors](docs/reference.md) | Embedding models, config file, error reference |
@@ -125,6 +125,7 @@ CREATE COLLECTION articles QUANTIZE TURBO BITS 2
 CREATE COLLECTION articles QUANTIZE TURBO BITS 1.5 ALWAYS RAM
 CREATE INDEX ON COLLECTION articles FOR year TYPE integer
 SHOW COLLECTIONS
+SHOW COLLECTION articles
 DROP COLLECTION articles
 
 -- Delete

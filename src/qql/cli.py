@@ -141,7 +141,7 @@ def connect(url: str, secret: str | None) -> None:
 
     cfg = QQLConfig(url=url, secret=secret)
     save_config(cfg)
-    console.print(f"[bold green]Connected.[/bold green] Config saved to ~/.qql/config.json\n")
+    console.print("[bold green]Connected.[/bold green] Config saved to ~/.qql/config.json\n")
     _launch_repl(cfg)
 
 
@@ -262,7 +262,7 @@ def dump(collection: str, output: str, batch_size: int) -> None:
         f"\n[bold green]Done.[/bold green] "
         f"{written} point(s) written"
         + (f", [yellow]{skipped} skipped[/yellow] (no 'text' field)" if skipped else "")
-        + f"."
+        + "."
     )
 
 
@@ -416,7 +416,7 @@ def _format_collection_diagnostics(data: dict) -> str:
     # Sharding
     sh = data["sharding"]
     lines.append(f"  Shards               : {sh['shard_number']}")
-    lines.append(f"  Replicas              : {sh['replication_factor']}")
+    lines.append(f"  Replicas             : {sh['replication_factor']}")
     lines.append(f"  Write consistency    : {sh['write_consistency_factor']}")
 
     return "\n".join(lines)
