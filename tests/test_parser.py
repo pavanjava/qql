@@ -28,6 +28,7 @@ from qql.ast_nodes import (
     ScrollStmt,
     SearchStmt,
     SearchWith,
+    ShowCollectionStmt,
     ShowCollectionsStmt,
 )
 from qql.exceptions import QQLSyntaxError
@@ -189,6 +190,16 @@ class TestShow:
     def test_show_collections(self):
         node = parse("SHOW COLLECTIONS")
         assert isinstance(node, ShowCollectionsStmt)
+
+    def test_show_collection(self):
+        node = parse("SHOW COLLECTION docs")
+        assert isinstance(node, ShowCollectionStmt)
+        assert node.collection == "docs"
+
+    def test_show_collection_case_insensitive(self):
+        node = parse("show collection MY_COL")
+        assert isinstance(node, ShowCollectionStmt)
+        assert node.collection == "MY_COL"
 
 
 class TestScroll:

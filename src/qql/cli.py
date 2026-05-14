@@ -49,6 +49,11 @@ Available statements:
   [yellow]SHOW COLLECTIONS[/yellow]
       List all collections in the connected Qdrant instance.
 
+  [yellow]SHOW COLLECTION[/yellow] <name>
+      Show detailed diagnostics for a single collection: point count, vector
+      config, distance metric, quantization, HNSW parameters, payload indexes,
+      and sharding info.
+
   [yellow]SCROLL FROM[/yellow] <name> [yellow]LIMIT[/yellow] <n>
       Paginate points by ID order.
       Optional: [yellow]WHERE[/yellow] <filter>
@@ -362,6 +367,61 @@ def _launch_repl(cfg: QQLConfig) -> None:
         _run_and_print(executor, query)
 
 
+def _format_collection_diagnostics(data: dict) -> str:
+    """Format SHOW COLLECTION <name> diagnostics into a rich string."""
+    lines = []
+
+    lines.append(f"[bold cyan]Collection:[/bold cyan] {data['name']}")
+    lines.append(f"  Status               : {data['status']}")
+    lines.append(f"  Points               : {data['points_count']}")
+    lines.append(f"  Indexed vectors      : {data['indexed_vectors_count']}")
+    lines.append(f"  Segments             : {data['segments_count']}")
+    lines.append(f"  Topology             : {data['topology']}")
+
+    # Vectors
+    vectors = data["vectors"]
+    for vname, vconf in vectors.items():
+        label = f"  Vector '{vname}'" if vname else "  Vector"
+        lines.append(f"{label}        : {vconf['size']} dims, {vconf['distance']} distance")
+
+    # Sparse vectors
+    if data["sparse_vectors"]:
+        for sname, sconf in data["sparse_vectors"].items():
+            lines.append(f"  Sparse '{sname}'      : modifier={sconf['modifier']}")
+
+    lines.append(f"  Quantization         : {data['quantization'] or 'none'}")
+
+    # HNSW config
+    hnsw = data["hnsw_config"]
+    lines.append(f"  HNSW M               : {hnsw['m']}")
+    lines.append(f"  HNSW ef_construct    : {hnsw['ef_construct']}")
+    if hnsw.get("full_scan_threshold") is not None:
+        lines.append(f"  HNSW full_scan_thres : {hnsw['full_scan_threshold']}")
+    if hnsw.get("max_indexing_threads") is not None:
+        lines.append(f"  HNSW max_idx_threads : {hnsw['max_indexing_threads']}")
+    if hnsw.get("on_disk") is not None:
+        lines.append(f"  HNSW on_disk         : {hnsw['on_disk']}")
+    if hnsw.get("payload_m") is not None:
+        lines.append(f"  HNSW payload_m       : {hnsw['payload_m']}")
+
+    # Payload schema
+    schema = data["payload_schema"]
+    if schema:
+        lines.append("  Payload indexes:")
+        for field, dtype in schema.items():
+            lines.append(f"    {field}: {dtype}")
+    else:
+        lines.append("  Payload indexes      : none")
+
+    # Sharding
+    sh = data["sharding"]
+    lines.append(f"  Shards               : {sh['shard_number']}")
+    lines.append(f"  Replicas              : {sh['replication_factor']}")
+    lines.append(f"  Write consistency    : {sh['write_consistency_factor']}")
+
+    return "\n".join(lines)
+
+
 def _run_and_print(executor: Executor, query: str) -> None:
     try:
         tokens = Lexer().tokenize(query)
@@ -391,6 +451,11 @@ def _run_and_print(executor: Executor, query: str) -> None:
             for name in result.data:
                 table.add_row(name)
             console.print(table)
+        return
+
+    # Pretty-print SHOW COLLECTION <name> diagnostics
+    if isinstance(result.data, dict) and "topology" in result.data:
+        console.print(_format_collection_diagnostics(result.data))
         return
 
     # Pretty-print search results

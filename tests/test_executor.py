@@ -14,6 +14,7 @@ from qql.ast_nodes import (
     ScrollStmt,
     SearchStmt,
     SearchWith,
+    ShowCollectionStmt,
     ShowCollectionsStmt,
 )
 from qql.config import QQLConfig
@@ -357,6 +358,147 @@ class TestShow:
         assert result.success is True
         assert "notes" in result.data
         assert "docs" in result.data
+
+
+class TestShowCollection:
+    def test_show_collection_returns_diagnostics(self, executor, mock_client, mocker):
+        from qdrant_client.models import (
+            CollectionStatus,
+            Distance,
+            VectorParams,
+        )
+
+        mock_client.collection_exists.return_value = True
+
+        mock_info = mocker.MagicMock()
+        mock_info.status = CollectionStatus.GREEN
+        mock_info.points_count = 42
+        mock_info.indexed_vectors_count = 42
+        mock_info.segments_count = 2
+
+        mock_info.config.params.vectors = VectorParams(size=384, distance=Distance.COSINE)
+        mock_info.config.params.shard_number = 1
+        mock_info.config.params.replication_factor = 1
+        mock_info.config.params.write_consistency_factor = 1
+        mock_info.config.params.sparse_vectors = None
+        mock_info.config.hnsw_config.m = 16
+        mock_info.config.hnsw_config.ef_construct = 100
+        mock_info.config.hnsw_config.full_scan_threshold = None
+        mock_info.config.hnsw_config.max_indexing_threads = None
+        mock_info.config.hnsw_config.on_disk = None
+        mock_info.config.hnsw_config.payload_m = None
+        mock_info.config.quantization_config = None
+        mock_info.payload_schema = {}
+
+        mock_client.get_collection.return_value = mock_info
+
+        node = ShowCollectionStmt(collection="docs")
+        result = executor.execute(node)
+
+        assert result.success is True
+        data = result.data
+        assert data["name"] == "docs"
+        assert data["points_count"] == 42
+        assert data["topology"] == "dense"
+        assert data["vectors"][""]["size"] == 384
+        assert data["vectors"][""]["distance"] == "Cosine"
+        assert data["quantization"] is None
+        assert data["hnsw_config"]["m"] == 16
+        assert data["hnsw_config"]["ef_construct"] == 100
+        assert data["payload_schema"] is None
+        assert data["sparse_vectors"] is None
+
+    def test_show_collection_hybrid(self, executor, mock_client, mocker):
+        from qdrant_client.models import (
+            CollectionStatus,
+            Distance,
+            Modifier,
+            SparseVectorParams,
+            VectorParams,
+        )
+
+        mock_client.collection_exists.return_value = True
+
+        mock_info = mocker.MagicMock()
+        mock_info.status = CollectionStatus.GREEN
+        mock_info.points_count = 10
+        mock_info.indexed_vectors_count = 10
+        mock_info.segments_count = 1
+
+        mock_info.config.params.vectors = {
+            "dense": VectorParams(size=768, distance=Distance.COSINE),
+        }
+        mock_info.config.params.sparse_vectors = {
+            "sparse": SparseVectorParams(modifier=Modifier.IDF),
+        }
+        mock_info.config.params.shard_number = 1
+        mock_info.config.params.replication_factor = 1
+        mock_info.config.params.write_consistency_factor = 1
+        mock_info.config.hnsw_config.m = 16
+        mock_info.config.hnsw_config.ef_construct = 100
+        mock_info.config.hnsw_config.full_scan_threshold = None
+        mock_info.config.hnsw_config.max_indexing_threads = None
+        mock_info.config.hnsw_config.on_disk = None
+        mock_info.config.hnsw_config.payload_m = None
+        mock_info.config.quantization_config = None
+        mock_info.payload_schema = {}
+
+        mock_client.get_collection.return_value = mock_info
+
+        node = ShowCollectionStmt(collection="hybrid_col")
+        result = executor.execute(node)
+
+        assert result.success is True
+        data = result.data
+        assert data["topology"] == "hybrid"
+        assert data["vectors"]["dense"]["size"] == 768
+        assert data["sparse_vectors"]["sparse"]["modifier"] == "idf"
+
+    def test_show_collection_with_payload_schema(self, executor, mock_client, mocker):
+        from qdrant_client.models import (
+            CollectionStatus,
+            Distance,
+            PayloadSchemaType,
+            VectorParams,
+        )
+
+        mock_client.collection_exists.return_value = True
+
+        idx_info = mocker.MagicMock()
+        idx_info.data_type = PayloadSchemaType.KEYWORD
+
+        mock_info = mocker.MagicMock()
+        mock_info.status = CollectionStatus.GREEN
+        mock_info.points_count = 0
+        mock_info.indexed_vectors_count = 0
+        mock_info.segments_count = 0
+        mock_info.config.params.vectors = VectorParams(size=384, distance=Distance.COSINE)
+        mock_info.config.params.shard_number = 1
+        mock_info.config.params.replication_factor = 1
+        mock_info.config.params.write_consistency_factor = 1
+        mock_info.config.params.sparse_vectors = None
+        mock_info.config.hnsw_config.m = 16
+        mock_info.config.hnsw_config.ef_construct = 100
+        mock_info.config.hnsw_config.full_scan_threshold = None
+        mock_info.config.hnsw_config.max_indexing_threads = None
+        mock_info.config.hnsw_config.on_disk = None
+        mock_info.config.hnsw_config.payload_m = None
+        mock_info.config.quantization_config = None
+        mock_info.payload_schema = {"category": idx_info}
+
+        mock_client.get_collection.return_value = mock_info
+
+        node = ShowCollectionStmt(collection="docs")
+        result = executor.execute(node)
+
+        assert result.success is True
+        assert result.data["payload_schema"] == {"category": "keyword"}
+
+    def test_show_collection_nonexistent_raises(self, executor, mock_client):
+        mock_client.collection_exists.return_value = False
+        node = ShowCollectionStmt(collection="ghost")
+        with pytest.raises(QQLRuntimeError, match="does not exist"):
+            executor.execute(node)
 
 
 class TestScroll:

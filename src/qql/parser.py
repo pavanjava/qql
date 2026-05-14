@@ -30,6 +30,7 @@ from .ast_nodes import (
     ScrollStmt,
     SearchStmt,
     SearchWith,
+    ShowCollectionStmt,
     ShowCollectionsStmt,
 )
 from .exceptions import QQLSyntaxError
@@ -291,10 +292,14 @@ class Parser:
         collection = self._parse_identifier()
         return DropCollectionStmt(collection=collection)
 
-    def _parse_show(self) -> ShowCollectionsStmt:
+    def _parse_show(self) -> ShowCollectionsStmt | ShowCollectionStmt:
         self._expect(TokenKind.SHOW)
-        self._expect(TokenKind.COLLECTIONS)
-        return ShowCollectionsStmt()
+        if self._peek().kind == TokenKind.COLLECTIONS:
+            self._advance()
+            return ShowCollectionsStmt()
+        self._expect(TokenKind.COLLECTION)
+        collection = self._parse_identifier()
+        return ShowCollectionStmt(collection=collection)
 
     def _parse_scroll(self) -> ScrollStmt:
         self._expect(TokenKind.SCROLL)

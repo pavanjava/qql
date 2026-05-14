@@ -80,6 +80,7 @@ from .ast_nodes import (
     ScrollStmt,
     SearchStmt,
     SearchWith,
+    ShowCollectionStmt,
     ShowCollectionsStmt,
 )
 from .config import QQLConfig
@@ -117,6 +118,8 @@ class Executor:
             return self._execute_drop(node)
         if isinstance(node, ShowCollectionsStmt):
             return self._execute_show(node)
+        if isinstance(node, ShowCollectionStmt):
+            return self._execute_show_collection(node)
         if isinstance(node, ScrollStmt):
             return self._execute_scroll(node)
         if isinstance(node, SelectStmt):
@@ -416,6 +419,104 @@ class Executor:
             success=True,
             message=f"{len(names)} collection(s) found",
             data=names,
+        )
+
+    def _execute_show_collection(self, node: ShowCollectionStmt) -> ExecutionResult:
+        if not self._client.collection_exists(node.collection):
+            raise QQLRuntimeError(f"Collection '{node.collection}' does not exist")
+
+        info = self._client.get_collection(node.collection)
+        config = info.config
+        params = config.params
+
+        # ── Vector topology ────────────────────────────────────────────────
+        vectors = params.vectors  # type: ignore[union-attr]
+        if isinstance(vectors, dict):
+            topology = "hybrid"
+            vector_details = {}
+            for vname, vconfig in vectors.items():
+                vector_details[vname] = {
+                    "size": vconfig.size,
+                    "distance": str(vconfig.distance) if vconfig.distance else None,
+                }
+        else:
+            topology = "dense"
+            vector_details = {
+                "": {
+                    "size": vectors.size,
+                    "distance": str(vectors.distance) if vectors.distance else None,
+                }
+            }
+
+        # ── Sparse vector config ───────────────────────────────────────────
+        sparse_vectors = {}
+        if params.sparse_vectors:
+            for sname, sconfig in params.sparse_vectors.items():
+                sparse_vectors[sname] = {
+                    "modifier": str(sconfig.modifier) if sconfig.modifier else None,
+                }
+
+        # ── Quantization ───────────────────────────────────────────────────
+        quant_config = config.quantization_config
+        quantization = None
+        if quant_config is not None:
+            qtype = type(quant_config).__name__
+            if hasattr(quant_config, "scalar"):
+                quantization = "scalar"
+            elif hasattr(quant_config, "binary"):
+                quantization = "binary"
+            elif hasattr(quant_config, "product"):
+                quantization = "product"
+            elif hasattr(quant_config, "turbo"):
+                quantization = "turbo"
+            else:
+                quantization = qtype
+
+        # ── HNSW config ────────────────────────────────────────────────────
+        hnsw = {
+            "m": config.hnsw_config.m,
+            "ef_construct": config.hnsw_config.ef_construct,
+        }
+        if config.hnsw_config.full_scan_threshold is not None:
+            hnsw["full_scan_threshold"] = config.hnsw_config.full_scan_threshold
+        if config.hnsw_config.max_indexing_threads is not None:
+            hnsw["max_indexing_threads"] = config.hnsw_config.max_indexing_threads
+        if config.hnsw_config.on_disk is not None:
+            hnsw["on_disk"] = config.hnsw_config.on_disk
+        if config.hnsw_config.payload_m is not None:
+            hnsw["payload_m"] = config.hnsw_config.payload_m
+
+        # ── Payload schema / indexes ───────────────────────────────────────
+        payload_indexes = {}
+        for field_name, idx_info in info.payload_schema.items():
+            payload_indexes[field_name] = str(idx_info.data_type)
+
+        # ── Sharding / replication ─────────────────────────────────────────
+        sharding = {
+            "shard_number": params.shard_number,
+            "replication_factor": params.replication_factor,
+            "write_consistency_factor": params.write_consistency_factor,
+        }
+
+        data = {
+            "name": node.collection,
+            "status": str(info.status),
+            "points_count": info.points_count,
+            "indexed_vectors_count": info.indexed_vectors_count,
+            "segments_count": info.segments_count,
+            "topology": topology,
+            "vectors": vector_details,
+            "sparse_vectors": sparse_vectors or None,
+            "quantization": quantization,
+            "hnsw_config": hnsw,
+            "payload_schema": payload_indexes or None,
+            "sharding": sharding,
+        }
+
+        return ExecutionResult(
+            success=True,
+            message=f"Collection '{node.collection}' diagnostics",
+            data=data,
         )
 
     def _execute_scroll(self, node: ScrollStmt) -> ExecutionResult:
