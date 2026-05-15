@@ -138,7 +138,7 @@ class ExecutionResult:
 | INSERT BULK | `None` (count in `result.message`) |
 | SELECT | `{"id": str, "payload": dict}` or `None` when not found |
 | SEARCH | `[{"id": str, "score": float, "payload": dict}, ...]` |
-| SCROLL | `{"points": [{"id": str, "payload": dict}, ...], "next_offset": str \| None}` |
+| SCROLL | `{"points": [{"id": str, "payload": dict}, ...], "next_offset": str \| int \| None}` |
 | RECOMMEND | `[{"id": str, "score": float, "payload": dict}, ...]` |
 | SHOW COLLECTIONS | `["name1", "name2", ...]` |
 | SHOW COLLECTION | `{"name": str, "status": str, "points_count": int \| None, "indexed_vectors_count": int \| None, "segments_count": int, "topology": str, "vectors": dict, "sparse_vectors": dict \| None, "quantization": str \| None, "hnsw_config": dict, "payload_schema": dict \| None, "sharding": dict}` |

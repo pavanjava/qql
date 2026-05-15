@@ -23,6 +23,7 @@ from .ast_nodes import (
     NotExpr,
     NotInExpr,
     OrExpr,
+    QuantizationSearchWith,
     QuantizationConfig,
     QuantizationType,
     RecommendStmt,
@@ -414,6 +415,8 @@ class Parser:
                     hnsw_ef=with_clause.hnsw_ef,
                     exact=True,
                     acorn=with_clause.acorn,
+                    indexed_only=with_clause.indexed_only,
+                    quantization=with_clause.quantization,
                 )
         if self._peek().kind == TokenKind.WITH:
             self._advance()  # consume WITH
@@ -425,6 +428,8 @@ class Parser:
                     hnsw_ef=parsed_with.hnsw_ef or with_clause.hnsw_ef,
                     exact=parsed_with.exact or with_clause.exact,
                     acorn=parsed_with.acorn or with_clause.acorn,
+                    indexed_only=parsed_with.indexed_only or with_clause.indexed_only,
+                    quantization=parsed_with.quantization or with_clause.quantization,
                 )
         group_by: str | None = None
         group_size: int = 3
@@ -760,8 +765,8 @@ class Parser:
             f"Expected a field name, got '{tok.value}'", tok.pos
         )
 
-    def _parse_literal(self) -> str | int | float:
-        """STRING | INTEGER | FLOAT"""
+    def _parse_literal(self) -> str | int | float | bool:
+        """STRING | INTEGER | FLOAT | boolean"""
         tok = self._peek()
         if tok.kind == TokenKind.STRING:
             self._advance()
@@ -772,8 +777,16 @@ class Parser:
         if tok.kind == TokenKind.FLOAT:
             self._advance()
             return float(tok.value)
+        if tok.kind == TokenKind.IDENTIFIER:
+            upper = tok.value.upper()
+            if upper == "TRUE":
+                self._advance()
+                return True
+            if upper == "FALSE":
+                self._advance()
+                return False
         raise QQLSyntaxError(
-            f"Expected a literal value (string, integer, or float), got '{tok.value}'",
+            f"Expected a literal value (string, integer, float, or boolean), got '{tok.value}'",
             tok.pos,
         )
 
@@ -790,10 +803,10 @@ class Parser:
             f"Expected a number, got '{tok.value}'", tok.pos
         )
 
-    def _parse_literal_list(self) -> list[str | int | float]:
+    def _parse_literal_list(self) -> list[str | int | float | bool]:
         """'(' literal { ',' literal } [','] ')'  — used by IN / NOT IN."""
         self._expect(TokenKind.LPAREN)
-        items: list[str | int | float] = []
+        items: list[str | int | float | bool] = []
         if self._peek().kind == TokenKind.RPAREN:
             self._advance()
             return items
@@ -942,13 +955,15 @@ class Parser:
             return self._parse_list()
         raise QQLSyntaxError(f"Unexpected value token '{tok.value}'", tok.pos)
 
-    # ── WITH clause: { hnsw_ef: N, exact: true, acorn: true } ──
+    # ── WITH clause: { hnsw_ef: N, exact: true, acorn: true, ... } ──
 
     def _parse_with_clause(self) -> SearchWith:
         self._expect(TokenKind.LBRACE)
         hnsw_ef: int | None = None
         exact: bool = False
         acorn: bool = False
+        indexed_only: bool = False
+        quantization: QuantizationSearchWith | None = None
         while self._peek().kind != TokenKind.RBRACE:
             key_tok = self._peek()
             if key_tok.kind not in (
@@ -969,9 +984,14 @@ class Parser:
                 exact = self._parse_bool()
             elif key == "acorn":
                 acorn = self._parse_bool()
+            elif key == "indexed_only":
+                indexed_only = self._parse_bool()
+            elif key == "quantization":
+                quantization = self._parse_quantization_search_with()
             else:
                 raise QQLSyntaxError(
-                    f"Unknown WITH parameter '{key}'. Expected: hnsw_ef, exact, acorn",
+                    "Unknown WITH parameter "
+                    f"'{key}'. Expected: hnsw_ef, exact, acorn, indexed_only, quantization",
                     key_tok.pos,
                 )
             if self._peek().kind == TokenKind.COMMA:
@@ -985,6 +1005,44 @@ class Parser:
             hnsw_ef=hnsw_ef,
             exact=exact,
             acorn=acorn,
+            indexed_only=indexed_only,
+            quantization=quantization,
+        )
+
+    def _parse_quantization_search_with(self) -> QuantizationSearchWith:
+        self._expect(TokenKind.LBRACE)
+        ignore: bool | None = None
+        rescore: bool | None = None
+        oversampling: float | None = None
+
+        while self._peek().kind != TokenKind.RBRACE:
+            key_tok = self._expect(TokenKind.IDENTIFIER)
+            key = key_tok.value.lower()
+            self._expect(TokenKind.COLON)
+            if key == "ignore":
+                ignore = self._parse_bool()
+            elif key == "rescore":
+                rescore = self._parse_bool()
+            elif key == "oversampling":
+                oversampling = float(self._parse_number())
+            else:
+                raise QQLSyntaxError(
+                    "Unknown quantization parameter "
+                    f"'{key}'. Expected: ignore, rescore, oversampling",
+                    key_tok.pos,
+                )
+            if self._peek().kind == TokenKind.COMMA:
+                self._advance()
+                if self._peek().kind == TokenKind.RBRACE:
+                    break
+            else:
+                break
+
+        self._expect(TokenKind.RBRACE)
+        return QuantizationSearchWith(
+            ignore=ignore,
+            rescore=rescore,
+            oversampling=oversampling,
         )
 
     def _parse_bool(self) -> bool:

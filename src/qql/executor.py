@@ -35,6 +35,7 @@ from qdrant_client.models import (
     Prefetch,
     ProductQuantization,
     ProductQuantizationConfig,
+    QuantizationSearchParams,
     Range,
     RecommendInput,
     RecommendQuery,
@@ -559,7 +560,7 @@ class Executor:
         return ExecutionResult(
             success=True,
             message=f"Scrolled {len(points)} point(s) from '{node.collection}'",
-            data={"points": points, "next_offset": None if next_offset is None else str(next_offset)},
+            data={"points": points, "next_offset": next_offset},
         )
 
     def _execute_select(self, node: SelectStmt) -> ExecutionResult:
@@ -678,6 +679,7 @@ class Executor:
                     using="sparse",
                     limit=fetch_limit,
                     query_filter=qdrant_filter,
+                    search_params=search_params,
                 )
             except UnexpectedResponse as e:
                 raise QQLRuntimeError(f"Qdrant error during SEARCH: {e}") from e
@@ -825,9 +827,18 @@ class Executor:
     def _build_search_params(self, with_clause: SearchWith | None) -> SearchParams | None:
         if with_clause is None:
             return None
+        quantization = None
+        if with_clause.quantization is not None:
+            quantization = QuantizationSearchParams(
+                ignore=with_clause.quantization.ignore,
+                rescore=with_clause.quantization.rescore,
+                oversampling=with_clause.quantization.oversampling,
+            )
         return SearchParams(
             hnsw_ef=with_clause.hnsw_ef,
             exact=with_clause.exact,
+            quantization=quantization,
+            indexed_only=True if with_clause.indexed_only else None,
             acorn=AcornSearchParams(enable=True) if with_clause.acorn else None,
         )
 

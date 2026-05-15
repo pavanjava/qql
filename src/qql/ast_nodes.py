@@ -27,6 +27,15 @@ class SearchWith:
     hnsw_ef: int | None = None
     exact: bool = False
     acorn: bool = False
+    indexed_only: bool = False
+    quantization: "QuantizationSearchWith | None" = None
+
+
+@dataclass(frozen=True)
+class QuantizationSearchWith:
+    ignore: bool | None = None
+    rescore: bool | None = None
+    oversampling: float | None = None
 
 
 # ── Filter expression leaf nodes ──────────────────────────────────────────────
@@ -36,7 +45,7 @@ class CompareExpr:
     """field op literal  — covers =, !=, >, >=, <, <="""
     field: str
     op: str   # one of: "=", "!=", ">", ">=", "<", "<="
-    value: str | int | float
+    value: str | int | float | bool
 
 
 @dataclass(frozen=True)
@@ -51,14 +60,14 @@ class BetweenExpr:
 class InExpr:
     """field IN (v1, v2, ...)"""
     field: str
-    values: tuple[str | int | float, ...]
+    values: tuple[str | int | float | bool, ...]
 
 
 @dataclass(frozen=True)
 class NotInExpr:
     """field NOT IN (v1, v2, ...)"""
     field: str
-    values: tuple[str | int | float, ...]
+    values: tuple[str | int | float | bool, ...]
 
 
 @dataclass(frozen=True)

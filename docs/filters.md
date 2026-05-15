@@ -12,6 +12,9 @@ The `WHERE` clause lets you filter on any payload field using SQL-style predicat
 -- Exact match
 SEARCH articles SIMILAR TO 'ml' LIMIT 10 WHERE category = 'paper'
 
+-- Boolean match
+SEARCH articles SIMILAR TO 'ml' LIMIT 10 WHERE active = true
+
 -- Not equal
 SEARCH articles SIMILAR TO 'ml' LIMIT 10 WHERE status != 'draft'
 ```
@@ -43,6 +46,7 @@ SEARCH articles SIMILAR TO 'history of ai' LIMIT 10 WHERE year BETWEEN 2018 AND 
 ```sql
 SEARCH articles SIMILAR TO 'retrieval' LIMIT 10 WHERE status IN ('published', 'reviewed')
 SEARCH articles SIMILAR TO 'retrieval' LIMIT 10 WHERE status NOT IN ('deleted', 'archived')
+SEARCH articles SIMILAR TO 'retrieval' LIMIT 10 WHERE active IN (true, false)
 ```
 
 ---

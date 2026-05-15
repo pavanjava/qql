@@ -8,6 +8,7 @@ from qql.ast_nodes import (
     InsertBulkStmt,
     InsertStmt,
     QuantizationConfig,
+    QuantizationSearchWith,
     QuantizationType,
     RecommendStmt,
     SelectStmt,
@@ -606,6 +607,19 @@ class TestScroll:
             "next_offset": "next-1",
         }
 
+    def test_scroll_preserves_numeric_next_offset_type(self, executor, mock_client, mocker):
+        mock_client.collection_exists.return_value = True
+        rec = mocker.MagicMock()
+        rec.id = 1
+        rec.payload = {"text": "first"}
+        mock_client.scroll.return_value = ([rec], 42)
+
+        node = ScrollStmt(collection="notes", limit=1)
+        result = executor.execute(node)
+
+        assert result.success is True
+        assert result.data["next_offset"] == 42
+
     def test_scroll_with_after_and_filter(self, executor, mock_client, mocker):
         from qql.ast_nodes import CompareExpr
         from qdrant_client.models import Filter
@@ -727,6 +741,57 @@ class TestSearch:
         search_params = mock_client.query_points.call_args.kwargs["search_params"]
         assert search_params.hnsw_ef == 128
         assert search_params.acorn.enable is True
+
+    def test_search_with_indexed_only_and_quantization_forwards_search_params(
+        self, executor, mock_client, mocker
+    ):
+        mock_client.collection_exists.return_value = True
+        mock_response = mocker.MagicMock()
+        mock_response.points = []
+        mock_client.query_points.return_value = mock_response
+
+        node = SearchStmt(
+            collection="notes",
+            query_text="hello",
+            limit=5,
+            model=None,
+            with_clause=SearchWith(
+                indexed_only=True,
+                quantization=QuantizationSearchWith(
+                    ignore=True,
+                    rescore=False,
+                    oversampling=2.5,
+                ),
+            ),
+        )
+        executor.execute(node)
+
+        search_params = mock_client.query_points.call_args.kwargs["search_params"]
+        assert search_params.indexed_only is True
+        assert search_params.quantization is not None
+        assert search_params.quantization.ignore is True
+        assert search_params.quantization.rescore is False
+        assert search_params.quantization.oversampling == pytest.approx(2.5)
+
+    def test_sparse_search_forwards_search_params(self, executor, mock_client, mocker):
+        mock_client.collection_exists.return_value = True
+        mock_response = mocker.MagicMock()
+        mock_response.points = []
+        mock_client.query_points.return_value = mock_response
+
+        node = SearchStmt(
+            collection="notes",
+            query_text="hello",
+            limit=5,
+            model=None,
+            sparse_only=True,
+            with_clause=SearchWith(exact=True, indexed_only=True),
+        )
+        executor.execute(node)
+
+        search_params = mock_client.query_points.call_args.kwargs["search_params"]
+        assert search_params.exact is True
+        assert search_params.indexed_only is True
 
     def test_dense_search_against_hybrid_collection_uses_dense_vector_name(
         self, executor, mock_client, mocker
@@ -939,6 +1004,27 @@ class TestRecommend:
         search_params = mock_client.query_points.call_args.kwargs["search_params"]
         assert search_params.exact is True
         assert search_params.hnsw_ef == 128
+
+    def test_recommend_forwards_indexed_only_and_quantization(self, executor, mock_client, mocker):
+        mock_client.collection_exists.return_value = True
+        mock_response = mocker.MagicMock()
+        mock_response.points = []
+        mock_client.query_points.return_value = mock_response
+
+        node = RecommendStmt(
+            collection="notes",
+            positive_ids=("a",),
+            limit=5,
+            with_clause=SearchWith(
+                indexed_only=True,
+                quantization=QuantizationSearchWith(rescore=True),
+            ),
+        )
+        executor.execute(node)
+        search_params = mock_client.query_points.call_args.kwargs["search_params"]
+        assert search_params.indexed_only is True
+        assert search_params.quantization is not None
+        assert search_params.quantization.rescore is True
 
     def test_recommend_offset_zero_passes_none(self, executor, mock_client, mocker):
         mock_client.collection_exists.return_value = True

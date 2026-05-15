@@ -336,6 +336,16 @@ class TestRecommend:
         assert node.with_clause is not None
         assert node.with_clause.hnsw_ef == 128
 
+    def test_recommend_with_indexed_only_and_quantization(self):
+        node = parse(
+            "RECOMMEND FROM notes POSITIVE IDS ('a') LIMIT 10 "
+            "WITH { indexed_only: true, quantization: { rescore: true } }"
+        )
+        assert node.with_clause is not None
+        assert node.with_clause.indexed_only is True
+        assert node.with_clause.quantization is not None
+        assert node.with_clause.quantization.rescore is True
+
     def test_recommend_lookup_from(self):
         node = parse(
             "RECOMMEND FROM target_collection POSITIVE IDS ('a') "
@@ -458,6 +468,20 @@ class TestSearchWithWhere:
         assert isinstance(f, InExpr)
         assert f.field == "status"
         assert f.values == ("a", "b")
+
+    def test_boolean_equality_filter(self):
+        node = parse("SEARCH docs SIMILAR TO 'ml' LIMIT 5 WHERE active = true")
+        f = node.query_filter
+        assert isinstance(f, CompareExpr)
+        assert f.field == "active"
+        assert f.op == "="
+        assert f.value is True
+
+    def test_boolean_in_expr(self):
+        node = parse("SEARCH docs SIMILAR TO 'x' LIMIT 5 WHERE active IN (true, false)")
+        f = node.query_filter
+        assert isinstance(f, InExpr)
+        assert f.values == (True, False)
 
     def test_in_with_trailing_comma(self):
         node = parse("SEARCH docs SIMILAR TO 'x' LIMIT 5 WHERE status IN ('a', 'b',)")
@@ -899,6 +923,22 @@ class TestSearchWithClause:
         assert node.with_clause.hnsw_ef == 256
         assert node.with_clause.acorn is True
 
+    def test_with_indexed_only(self):
+        node = parse("SEARCH col SIMILAR TO 'q' LIMIT 5 WITH { indexed_only: true }")
+        assert node.with_clause is not None
+        assert node.with_clause.indexed_only is True
+
+    def test_with_quantization(self):
+        node = parse(
+            "SEARCH col SIMILAR TO 'q' LIMIT 5 "
+            "WITH { quantization: { ignore: true, rescore: false, oversampling: 2 } }"
+        )
+        assert node.with_clause is not None
+        assert node.with_clause.quantization is not None
+        assert node.with_clause.quantization.ignore is True
+        assert node.with_clause.quantization.rescore is False
+        assert node.with_clause.quantization.oversampling == pytest.approx(2.0)
+
     def test_with_after_where(self):
         node = parse(
             "SEARCH col SIMILAR TO 'q' LIMIT 5 WHERE year > 2020 WITH { hnsw_ef: 128 }"
@@ -932,6 +972,13 @@ class TestSearchWithClause:
     def test_with_trailing_comma(self):
         node = parse("SEARCH col SIMILAR TO 'q' LIMIT 5 WITH { hnsw_ef: 256, }")
         assert node.with_clause.hnsw_ef == 256
+
+    def test_with_quantization_unknown_key_raises(self):
+        with pytest.raises(QQLSyntaxError):
+            parse(
+                "SEARCH col SIMILAR TO 'q' LIMIT 5 "
+                "WITH { quantization: { unknown: true } }"
+            )
 
 
 class TestSparseOnlySearch:

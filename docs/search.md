@@ -17,7 +17,7 @@ SEARCH <collection_name> SIMILAR TO '<query_text>' LIMIT <n> USING HYBRID
 SEARCH <collection_name> SIMILAR TO '<query_text>' LIMIT <n> USING HYBRID [FUSION 'rrf|dbsf'] [DENSE MODEL '<model>'] [SPARSE MODEL '<model>'] [WHERE <filter>]
 SEARCH <collection_name> SIMILAR TO '<query_text>' LIMIT <n> USING SPARSE [MODEL '<sparse_model>']
 SEARCH <collection_name> SIMILAR TO '<query_text>' LIMIT <n> EXACT
-SEARCH <collection_name> SIMILAR TO '<query_text>' LIMIT <n> [USING ...] [WHERE <filter>] [RERANK] WITH { hnsw_ef: <n>, exact: true|false, acorn: true|false }
+SEARCH <collection_name> SIMILAR TO '<query_text>' LIMIT <n> [USING ...] [WHERE <filter>] [RERANK] WITH { hnsw_ef: <n>, exact: true|false, acorn: true|false, indexed_only: true|false, quantization: { ignore: true|false, rescore: true|false, oversampling: <n> } }
 SEARCH <collection_name> SIMILAR TO '<query_text>' LIMIT <n> [USING ...] [WHERE <filter>] RERANK [MODEL '<reranker_model>']
 ```
 
@@ -102,10 +102,12 @@ Use these when you want to debug retrieval quality or tune recall without changi
 | `WITH { hnsw_ef: 128 }` | Increase HNSW exploration at query time |
 | `WITH { exact: true }` | Force exact KNN explicitly |
 | `WITH { acorn: true }` | Enable ACORN for filtered queries |
+| `WITH { indexed_only: true }` | Restrict the query to indexed segments only |
+| `WITH { quantization: { ... } }` | Tune quantized-search behavior at query time |
 
 - `EXACT` can appear after `LIMIT` or after `RERANK`
 - `WITH { ... }` can appear after `WHERE` and/or `RERANK`
-- Supported `WITH` keys are only `hnsw_ef`, `exact`, and `acorn`
+- Supported top-level `WITH` keys are `hnsw_ef`, `exact`, `acorn`, `indexed_only`, and `quantization`
 
 ```sql
 -- Exact KNN baseline
@@ -116,6 +118,12 @@ SEARCH articles SIMILAR TO 'transformers' LIMIT 10 WITH { hnsw_ef: 256 }
 
 -- Filtered search with ACORN
 SEARCH articles SIMILAR TO 'RAG' LIMIT 10 WHERE tag = 'li' WITH { acorn: true }
+
+-- Restrict to indexed segments only
+SEARCH articles SIMILAR TO 'retrieval' LIMIT 10 WITH { indexed_only: true }
+
+-- Quantized-search tuning
+SEARCH articles SIMILAR TO 'vector db' LIMIT 10 WITH { quantization: { ignore: true, oversampling: 2 } }
 ```
 
 ---
@@ -142,6 +150,7 @@ SCROLL FROM articles AFTER 'cursor-id' LIMIT 50
 **Behavior:**
 - Returns points in ID order with payloads.
 - Returns a `next_offset` cursor when more points are available.
+- `next_offset` preserves the native point-id type (`string` or integer).
 - Use `AFTER <next_offset>` to fetch the next page.
 
 ---
@@ -230,7 +239,7 @@ RECOMMEND FROM <collection_name> POSITIVE IDS (<id>, ...) STRATEGY '<strategy>' 
 RECOMMEND FROM <collection_name> POSITIVE IDS (<id>, ...) LIMIT <n> WHERE <filter>
 RECOMMEND FROM <collection_name> POSITIVE IDS (<id>, ...) LIMIT <n> OFFSET <n>
 RECOMMEND FROM <collection_name> POSITIVE IDS (<id>, ...) LIMIT <n> SCORE THRESHOLD <f>
-RECOMMEND FROM <collection_name> POSITIVE IDS (<id>, ...) LIMIT <n> WITH { exact: true, hnsw_ef: <n> }
+RECOMMEND FROM <collection_name> POSITIVE IDS (<id>, ...) LIMIT <n> WITH { exact: true, hnsw_ef: <n>, indexed_only: true|false, quantization: { ignore: true|false, rescore: true|false, oversampling: <n> } }
 RECOMMEND FROM <collection_name> POSITIVE IDS (<id>, ...) LIMIT <n> LOOKUP FROM <collection>
 RECOMMEND FROM <collection_name> POSITIVE IDS (<id>, ...) LIMIT <n> LOOKUP FROM <collection> VECTOR '<name>'
 RECOMMEND FROM <collection_name> POSITIVE IDS (<id>, ...) LIMIT <n> USING '<vector_name>'
