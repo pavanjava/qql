@@ -88,7 +88,7 @@ result = run_query(
 )
 print(result.data["topology"])         # "dense" or "hybrid"
 print(result.data["vectors"])          # {"": {...}} or {"dense": {...}, ...}
-print(result.data["payload_schema"])   # {"field": "keyword", ...} or None
+print(result.data["payload_schema"])   # {"field": {"type": "keyword", ...}, ...} or None
 ```
 
 ---

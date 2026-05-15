@@ -30,6 +30,7 @@ class TokenKind(Enum):
     RAM      = auto()
     TURBO    = auto()
     BITS     = auto()
+    HNSW     = auto()
     CREATE = auto()
     INDEX = auto()
     ON = auto()
@@ -129,6 +130,7 @@ _KEYWORDS: dict[str, TokenKind] = {
     "RAM":      TokenKind.RAM,
     "TURBO":    TokenKind.TURBO,
     "BITS":     TokenKind.BITS,
+    "HNSW":     TokenKind.HNSW,
     "CREATE": TokenKind.CREATE,
     "INDEX": TokenKind.INDEX,
     "ON": TokenKind.ON,

@@ -23,7 +23,6 @@ from .ast_nodes import (
     NotExpr,
     NotInExpr,
     OrExpr,
-    QuantizationSearchWith,
     QuantizationConfig,
     QuantizationType,
     QuantizationSearchWith,
@@ -194,15 +193,36 @@ class Parser:
 
             # ── Optional QUANTIZE clause ──────────────────────────────────
             quantization: QuantizationConfig | None = None
-            if self._peek().kind == TokenKind.QUANTIZE:
-                self._advance()  # consume QUANTIZE
-                quantization = self._parse_quantize_clause()
+            payload_m: int | None = None
+            seen_quantize = False
+            seen_hnsw = False
+            while self._peek().kind in (TokenKind.QUANTIZE, TokenKind.HNSW):
+                if self._peek().kind == TokenKind.QUANTIZE:
+                    if seen_quantize:
+                        raise QQLSyntaxError(
+                            "QUANTIZE clause may only appear once",
+                            self._peek().pos,
+                        )
+                    self._advance()  # consume QUANTIZE
+                    quantization = self._parse_quantize_clause()
+                    seen_quantize = True
+                    continue
+
+                if seen_hnsw:
+                    raise QQLSyntaxError(
+                        "HNSW clause may only appear once",
+                        self._peek().pos,
+                    )
+                self._advance()  # consume HNSW
+                payload_m = self._parse_collection_hnsw_clause()
+                seen_hnsw = True
 
             return CreateCollectionStmt(
                 collection=collection,
                 hybrid=hybrid,
                 model=model,
                 quantization=quantization,
+                payload_m=payload_m,
             )
 
         self._expect(TokenKind.INDEX)
@@ -213,7 +233,32 @@ class Parser:
         field_name = self._parse_field_path()
         self._expect(TokenKind.TYPE)
         schema = self._expect(TokenKind.IDENTIFIER).value.lower()
-        return CreateIndexStmt(collection=collection, field_name=field_name, schema=schema)
+        options: dict[str, Any] | None = None
+        if self._peek().kind == TokenKind.WITH:
+            self._advance()
+            options = self._parse_dict()
+        return CreateIndexStmt(
+            collection=collection,
+            field_name=field_name,
+            schema=schema,
+            options=options,
+        )
+
+    def _parse_collection_hnsw_clause(self) -> int:
+        config = self._parse_dict()
+        unknown_keys = set(config) - {"payload_m"}
+        if unknown_keys:
+            raise QQLSyntaxError(
+                "Unknown HNSW parameter "
+                f"'{sorted(unknown_keys)[0]}'. Expected: payload_m",
+                0,
+            )
+        if "payload_m" not in config:
+            raise QQLSyntaxError("HNSW clause requires payload_m", 0)
+        payload_m = config["payload_m"]
+        if not isinstance(payload_m, int) or isinstance(payload_m, bool) or payload_m <= 0:
+            raise QQLSyntaxError("payload_m must be a positive integer", 0)
+        return payload_m
 
     def _parse_quantize_clause(self) -> QuantizationConfig:
         """Parse: (SCALAR | BINARY | PRODUCT) [QUANTILE <float>] [ALWAYS RAM]

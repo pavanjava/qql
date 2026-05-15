@@ -192,5 +192,6 @@ Expected output: **500 tests passing**.
 | `Vector elements must be numeric; got invalid value: ...` | A non-numeric value (string or null) was present in the vector array for `UPDATE SET VECTOR` | Ensure all vector elements are floats: `UPDATE … [0.1, 0.2, …, 0.N]` |
 | `GROUP_SIZE must be a positive integer, got N` | `GROUP_SIZE 0` or a negative value was specified | Use a positive integer: `GROUP_SIZE 3` |
 | `Qdrant error during SCROLL: ...` | Qdrant rejected scroll request | Verify collection state, filter, and cursor (`AFTER`) value |
-| `Unknown index type '...'` | Invalid schema type in CREATE INDEX | Use one of: `keyword`, `integer`, `float`, `bool`, `text`, `geo`, `datetime` |
+| `Unknown index type '...'` | Invalid schema type in CREATE INDEX | Use one of: `keyword`, `integer`, `float`, `bool`, `text`, `geo`, `datetime`, `uuid` |
+| `Unknown CREATE INDEX option '...'` | Unsupported advanced option for the chosen payload index type | Check which `WITH { ... }` keys are supported for `keyword`, `uuid`, or `text` |
 | `Qdrant error during CREATE INDEX: ...` | Qdrant rejected the index creation | Check field name and collection state |

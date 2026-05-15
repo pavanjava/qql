@@ -93,9 +93,10 @@ CREATE COLLECTION <collection_name> HYBRID
 CREATE COLLECTION <collection_name> USING MODEL '<model_name>'
 CREATE COLLECTION <collection_name> USING HYBRID
 CREATE COLLECTION <collection_name> USING HYBRID DENSE MODEL '<model>'
+CREATE COLLECTION <collection_name> HNSW { payload_m: <int> }
 ```
 
-Any of the above forms can be followed by an optional `QUANTIZE` clause — see [Quantization](#quantization--quantize-clause) below.
+Any of the above forms can be followed by an optional `QUANTIZE` clause and/or `HNSW { payload_m: <int> }`.
 
 **Examples:**
 
@@ -119,7 +120,24 @@ Hybrid collection with a custom dense model:
 CREATE COLLECTION research_papers USING HYBRID DENSE MODEL 'BAAI/bge-base-en-v1.5'
 ```
 
+Dense collection with payload-aware HNSW links:
+```sql
+CREATE COLLECTION research_papers HNSW {payload_m: 16}
+```
+
 When `USING MODEL` is omitted, the collection uses the **default embedding model's dimensions** (384 for `all-MiniLM-L6-v2`). If the collection already exists, the command succeeds with a message and does nothing.
+
+### HNSW clause
+
+QQL currently supports one explicit HNSW knob during collection creation:
+
+- `payload_m` — enables payload-aware HNSW connectivity used by Qdrant for filtered / tenant-aware workloads
+
+Example:
+
+```sql
+CREATE COLLECTION tenant_docs USING HYBRID HNSW {payload_m: 16}
+```
 
 ---
 
@@ -239,6 +257,7 @@ Creates a payload index on a collection field. Payload indexes speed up `WHERE` 
 **Syntax:**
 ```
 CREATE INDEX ON COLLECTION <collection_name> FOR <field_name> TYPE <schema_type>
+CREATE INDEX ON COLLECTION <collection_name> FOR <field_name> TYPE <schema_type> WITH { ... }
 ```
 
 **Supported schema types:**
@@ -252,19 +271,41 @@ CREATE INDEX ON COLLECTION <collection_name> FOR <field_name> TYPE <schema_type>
 | `text` | Full-text search (enables `MATCH` operators) |
 | `geo` | Geospatial coordinates |
 | `datetime` | Date/time values |
+| `uuid` | UUID payload values |
 
 **Examples:**
 
 ```sql
 CREATE INDEX ON COLLECTION articles FOR category TYPE keyword
+CREATE INDEX ON COLLECTION articles FOR tenant_id TYPE keyword WITH {is_tenant: true, on_disk: true, enable_hnsw: true}
 CREATE INDEX ON COLLECTION articles FOR year TYPE integer
+CREATE INDEX ON COLLECTION articles FOR doc_id TYPE uuid
 CREATE INDEX ON COLLECTION articles FOR title TYPE text
+CREATE INDEX ON COLLECTION articles FOR title TYPE text WITH {tokenizer: 'word', min_token_len: 2, max_token_len: 20, lowercase: true, phrase_matching: true}
 CREATE INDEX ON COLLECTION articles FOR meta.author TYPE keyword
 ```
+
+**Advanced options currently supported:**
+
+- `keyword` / `uuid`
+  - `is_tenant: true|false`
+  - `on_disk: true|false`
+  - `enable_hnsw: true|false`
+- `text`
+  - `tokenizer: 'prefix'|'whitespace'|'word'|'multilingual'`
+  - `min_token_len: <int>`
+  - `max_token_len: <int>`
+  - `lowercase: true|false`
+  - `ascii_folding: true|false`
+  - `phrase_matching: true|false`
+  - `stopwords: 'english'` or `stopwords: ['a', 'the']`
+  - `on_disk: true|false`
+  - `enable_hnsw: true|false`
 
 **Rules:**
 - The collection must already exist. Raises an error otherwise.
 - Indexes are idempotent — creating the same index twice succeeds silently.
+- Advanced `WITH { ... }` options are currently supported only for `keyword`, `uuid`, and `text`.
 
 ---
 

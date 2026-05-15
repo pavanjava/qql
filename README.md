@@ -123,11 +123,15 @@ SELECT * FROM articles WHERE id = '3f2e1a4b-...'
 -- Collections
 CREATE COLLECTION articles
 CREATE COLLECTION articles HYBRID
+CREATE COLLECTION articles HNSW { payload_m: 16 }
 CREATE COLLECTION articles QUANTIZE SCALAR
 CREATE COLLECTION articles QUANTIZE TURBO
 CREATE COLLECTION articles QUANTIZE TURBO BITS 2
 CREATE COLLECTION articles QUANTIZE TURBO BITS 1.5 ALWAYS RAM
 CREATE INDEX ON COLLECTION articles FOR year TYPE integer
+CREATE INDEX ON COLLECTION articles FOR tenant_id TYPE keyword WITH { is_tenant: true, on_disk: true }
+CREATE INDEX ON COLLECTION articles FOR doc_id TYPE uuid
+CREATE INDEX ON COLLECTION articles FOR title TYPE text WITH { tokenizer: 'word', min_token_len: 2, lowercase: true }
 SHOW COLLECTIONS
 SHOW COLLECTION articles
 DROP COLLECTION articles

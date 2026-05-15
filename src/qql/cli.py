@@ -38,6 +38,7 @@ Available statements:
       Create a new collection. Add HYBRID for dense+sparse BM25 vectors.
       Optional: [yellow]USING MODEL[/yellow] '<model>'
       Optional: [yellow]USING HYBRID[/yellow] [DENSE MODEL '<model>']
+      Optional: [yellow]HNSW[/yellow] { payload_m: <int> }
       Optional: [yellow]QUANTIZE SCALAR[/yellow] [QUANTILE <0.0–1.0>] [ALWAYS RAM]
       Optional: [yellow]QUANTIZE BINARY[/yellow] [ALWAYS RAM]
       Optional: [yellow]QUANTIZE PRODUCT[/yellow] [ALWAYS RAM]   (4× compression)
@@ -45,6 +46,11 @@ Available statements:
 
   [yellow]DROP COLLECTION[/yellow] <name>
       Delete a collection and all its points.
+
+  [yellow]CREATE INDEX ON COLLECTION[/yellow] <name> [yellow]FOR[/yellow] <field> [yellow]TYPE[/yellow] <schema>
+      Create a payload index for filtering or text search.
+      Optional: [yellow]WITH[/yellow] { is_tenant, on_disk, enable_hnsw } for keyword/uuid
+      Optional: [yellow]WITH[/yellow] { tokenizer, min_token_len, max_token_len, lowercase, ascii_folding, phrase_matching, stopwords, on_disk, enable_hnsw } for text
 
   [yellow]SHOW COLLECTIONS[/yellow]
       List all collections in the connected Qdrant instance.
@@ -420,8 +426,16 @@ def _format_collection_diagnostics(data: dict) -> str:
     schema = data["payload_schema"]
     if schema:
         lines.append("  Payload indexes:")
-        for field, dtype in schema.items():
-            lines.append(f"    {field}: {dtype}")
+        for field, index_info in schema.items():
+            if isinstance(index_info, dict):
+                line = f"    {field}: {index_info.get('type')}"
+                params = index_info.get("params")
+                if params:
+                    rendered = ", ".join(f"{k}={v}" for k, v in params.items())
+                    line += f" ({rendered})"
+                lines.append(line)
+            else:
+                lines.append(f"    {field}: {index_info}")
     else:
         lines.append("  Payload indexes      : none")
 

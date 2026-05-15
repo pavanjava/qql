@@ -172,6 +172,7 @@ class CreateCollectionStmt:
     hybrid: bool = False                      # if True, create with dense + sparse named vectors
     model: str | None = None                  # dense model; None → use config default
     quantization: QuantizationConfig | None = None  # optional QUANTIZE clause
+    payload_m: int | None = None              # optional HNSW { payload_m: N } clause
 
 
 @dataclass(frozen=True)
@@ -179,6 +180,7 @@ class CreateIndexStmt:
     collection: str
     field_name: str
     schema: str
+    options: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)

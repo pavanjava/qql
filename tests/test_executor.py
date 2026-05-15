@@ -244,6 +244,15 @@ class TestCreate:
         mock_client.create_collection.assert_called_once()
         assert result.success is True
 
+    def test_create_collection_passes_payload_m(self, executor, mock_client):
+        from qdrant_client.models import HnswConfigDiff
+
+        node = CreateCollectionStmt(collection="new_col", payload_m=24)
+        executor.execute(node)
+        kw = mock_client.create_collection.call_args.kwargs
+        assert isinstance(kw["hnsw_config"], HnswConfigDiff)
+        assert kw["hnsw_config"].payload_m == 24
+
     def test_create_existing_collection_is_noop(self, executor, mock_client):
         mock_client.collection_exists.return_value = True
         node = CreateCollectionStmt(collection="existing")
@@ -260,6 +269,74 @@ class TestCreateIndex:
         result = executor.execute(node)
         mock_client.create_payload_index.assert_called_once()
         assert result.success is True
+
+    def test_create_index_supports_keyword_options(self, executor, mock_client):
+        from qdrant_client.models import KeywordIndexParams
+
+        mock_client.collection_exists.return_value = True
+        node = CreateIndexStmt(
+            collection="articles",
+            field_name="tenant_id",
+            schema="keyword",
+            options={"is_tenant": True, "on_disk": True, "enable_hnsw": False},
+        )
+        executor.execute(node)
+        field_schema = mock_client.create_payload_index.call_args.kwargs["field_schema"]
+        assert isinstance(field_schema, KeywordIndexParams)
+        assert field_schema.is_tenant is True
+        assert field_schema.on_disk is True
+        assert field_schema.enable_hnsw is False
+
+    def test_create_index_supports_text_options(self, executor, mock_client):
+        from qdrant_client.models import TextIndexParams, TokenizerType
+
+        mock_client.collection_exists.return_value = True
+        node = CreateIndexStmt(
+            collection="articles",
+            field_name="title",
+            schema="text",
+            options={
+                "tokenizer": "word",
+                "min_token_len": 2,
+                "max_token_len": 20,
+                "lowercase": True,
+                "phrase_matching": True,
+            },
+        )
+        executor.execute(node)
+        field_schema = mock_client.create_payload_index.call_args.kwargs["field_schema"]
+        assert isinstance(field_schema, TextIndexParams)
+        assert field_schema.tokenizer == TokenizerType.WORD
+        assert field_schema.min_token_len == 2
+        assert field_schema.max_token_len == 20
+        assert field_schema.lowercase is True
+        assert field_schema.phrase_matching is True
+
+    def test_create_index_supports_uuid_options(self, executor, mock_client):
+        from qdrant_client.models import UuidIndexParams
+
+        mock_client.collection_exists.return_value = True
+        node = CreateIndexStmt(
+            collection="articles",
+            field_name="doc_id",
+            schema="uuid",
+            options={"on_disk": True},
+        )
+        executor.execute(node)
+        field_schema = mock_client.create_payload_index.call_args.kwargs["field_schema"]
+        assert isinstance(field_schema, UuidIndexParams)
+        assert field_schema.on_disk is True
+
+    def test_create_index_rejects_unknown_option(self, executor, mock_client):
+        mock_client.collection_exists.return_value = True
+        node = CreateIndexStmt(
+            collection="articles",
+            field_name="tenant_id",
+            schema="keyword",
+            options={"tokenizer": "word"},
+        )
+        with pytest.raises(QQLRuntimeError, match="Unknown CREATE INDEX option"):
+            executor.execute(node)
 
     def test_create_index_nonexistent_collection_raises(self, executor, mock_client):
         mock_client.collection_exists.return_value = False
@@ -498,6 +575,8 @@ class TestShowCollection:
         from qdrant_client.models import (
             CollectionStatus,
             Distance,
+            KeywordIndexParams,
+            KeywordIndexType,
             PayloadSchemaType,
             VectorParams,
         )
@@ -506,6 +585,11 @@ class TestShowCollection:
 
         idx_info = mocker.MagicMock()
         idx_info.data_type = PayloadSchemaType.KEYWORD
+        idx_info.params = KeywordIndexParams(
+            type=KeywordIndexType.KEYWORD,
+            is_tenant=True,
+            on_disk=True,
+        )
 
         mock_info = mocker.MagicMock()
         mock_info.status = CollectionStatus.GREEN
@@ -532,7 +616,12 @@ class TestShowCollection:
         result = executor.execute(node)
 
         assert result.success is True
-        assert result.data["payload_schema"] == {"category": "keyword"}
+        assert result.data["payload_schema"] == {
+            "category": {
+                "type": "keyword",
+                "params": {"is_tenant": True, "on_disk": True},
+            }
+        }
 
     def test_show_collection_handles_missing_payload_schema(self, executor, mock_client, mocker):
         from qdrant_client.models import (

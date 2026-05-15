@@ -18,8 +18,12 @@ from qdrant_client.models import (
     Fusion,
     FusionQuery,
     HasIdCondition,
+    HnswConfigDiff,
     IsEmptyCondition,
     IsNullCondition,
+    KeywordIndexParams,
+    KeywordIndexType,
+    Language,
     LookupLocation,
     MatchAny,
     MatchExcept,
@@ -51,6 +55,12 @@ from qdrant_client.models import (
     SearchParams,
     SparseVector,
     SparseVectorParams,
+    StopwordsSet,
+    TextIndexParams,
+    TextIndexType,
+    TokenizerType,
+    UuidIndexParams,
+    UuidIndexType,
     VectorParams,
 )
 
@@ -336,6 +346,12 @@ class Executor:
             if node.quantization is not None
             else ""
         )
+        hnsw_config = (
+            HnswConfigDiff(payload_m=node.payload_m)
+            if node.payload_m is not None
+            else None
+        )
+        hnsw_label = f", payload_m={node.payload_m}" if node.payload_m is not None else ""
 
         # ── Hybrid collection: named dense + sparse vectors ────────────────
         if node.hybrid:
@@ -352,12 +368,14 @@ class Executor:
             }
             if quant_config is not None:
                 create_kwargs["quantization_config"] = quant_config
+            if hnsw_config is not None:
+                create_kwargs["hnsw_config"] = hnsw_config
             self._create_collection_and_wait(**create_kwargs)
             return ExecutionResult(
                 success=True,
                 message=(
                     f"Collection '{node.collection}' created "
-                    f"(hybrid: {dims}-dim dense + BM25 sparse, cosine distance{quant_label})"
+                    f"(hybrid: {dims}-dim dense + BM25 sparse, cosine distance{quant_label}{hnsw_label})"
                 ),
             )
 
@@ -370,10 +388,12 @@ class Executor:
         }
         if quant_config is not None:
             create_kwargs["quantization_config"] = quant_config
+        if hnsw_config is not None:
+            create_kwargs["hnsw_config"] = hnsw_config
         self._create_collection_and_wait(**create_kwargs)
         return ExecutionResult(
             success=True,
-            message=f"Collection '{node.collection}' created ({dims}-dimensional vectors, cosine distance{quant_label})",
+            message=f"Collection '{node.collection}' created ({dims}-dimensional vectors, cosine distance{quant_label}{hnsw_label})",
         )
 
     def _execute_create_index(self, node: CreateIndexStmt) -> ExecutionResult:
@@ -388,14 +408,16 @@ class Executor:
             "text": PayloadSchemaType.TEXT,
             "geo": PayloadSchemaType.GEO,
             "datetime": PayloadSchemaType.DATETIME,
+            "uuid": PayloadSchemaType.UUID,
         }
         try:
-            field_schema = schema_map[node.schema]
+            schema_map[node.schema]
         except KeyError as e:
             raise QQLRuntimeError(
                 "Unknown index type '"
-                f"{node.schema}'. Expected one of: keyword, integer, float, bool, text, geo, datetime"
+                f"{node.schema}'. Expected one of: keyword, integer, float, bool, text, geo, datetime, uuid"
             ) from e
+        field_schema = self._build_payload_index_schema(node)
 
         try:
             self._client.create_payload_index(
@@ -406,10 +428,11 @@ class Executor:
         except UnexpectedResponse as e:
             raise QQLRuntimeError(f"Qdrant error during CREATE INDEX: {e}") from e
 
+        option_label = f" with options {node.options}" if node.options else ""
         return ExecutionResult(
             success=True,
             message=(
-                f"Created index on '{node.collection}.{node.field_name}' as '{node.schema}'"
+                f"Created index on '{node.collection}.{node.field_name}' as '{node.schema}'{option_label}"
             ),
         )
 
@@ -503,7 +526,7 @@ class Executor:
         # ── Payload schema / indexes ───────────────────────────────────────
         payload_indexes = {}
         for field_name, idx_info in (info.payload_schema or {}).items():
-            payload_indexes[field_name] = str(idx_info.data_type)
+            payload_indexes[field_name] = self._serialize_payload_index_info(idx_info)
 
         # ── Sharding / replication ─────────────────────────────────────────
         sharding = {
@@ -828,6 +851,193 @@ class Executor:
             message=f"Found {len(results)} recommendation(s)",
             data=results,
         )
+
+    def _build_payload_index_schema(self, node: CreateIndexStmt) -> Any:
+        options = node.options or {}
+        if node.schema == "keyword":
+            self._validate_index_option_keys(
+                node.schema,
+                options,
+                {"is_tenant", "on_disk", "enable_hnsw"},
+            )
+            if not options:
+                return PayloadSchemaType.KEYWORD
+            return KeywordIndexParams(
+                type=KeywordIndexType.KEYWORD,
+                is_tenant=self._index_bool_option(options, "is_tenant"),
+                on_disk=self._index_bool_option(options, "on_disk"),
+                enable_hnsw=self._index_bool_option(options, "enable_hnsw"),
+            )
+
+        if node.schema == "uuid":
+            self._validate_index_option_keys(
+                node.schema,
+                options,
+                {"is_tenant", "on_disk", "enable_hnsw"},
+            )
+            if not options:
+                return PayloadSchemaType.UUID
+            return UuidIndexParams(
+                type=UuidIndexType.UUID,
+                is_tenant=self._index_bool_option(options, "is_tenant"),
+                on_disk=self._index_bool_option(options, "on_disk"),
+                enable_hnsw=self._index_bool_option(options, "enable_hnsw"),
+            )
+
+        if node.schema == "text":
+            self._validate_index_option_keys(
+                node.schema,
+                options,
+                {
+                    "tokenizer",
+                    "min_token_len",
+                    "max_token_len",
+                    "lowercase",
+                    "ascii_folding",
+                    "phrase_matching",
+                    "stopwords",
+                    "on_disk",
+                    "enable_hnsw",
+                },
+            )
+            if not options:
+                return PayloadSchemaType.TEXT
+            min_token_len = self._index_int_option(options, "min_token_len")
+            max_token_len = self._index_int_option(options, "max_token_len")
+            if (
+                min_token_len is not None
+                and max_token_len is not None
+                and min_token_len > max_token_len
+            ):
+                raise QQLRuntimeError(
+                    "CREATE INDEX text option min_token_len cannot be greater than max_token_len"
+                )
+            return TextIndexParams(
+                type=TextIndexType.TEXT,
+                tokenizer=self._text_tokenizer_option(options),
+                min_token_len=min_token_len,
+                max_token_len=max_token_len,
+                lowercase=self._index_bool_option(options, "lowercase"),
+                ascii_folding=self._index_bool_option(options, "ascii_folding"),
+                phrase_matching=self._index_bool_option(options, "phrase_matching"),
+                stopwords=self._text_stopwords_option(options),
+                on_disk=self._index_bool_option(options, "on_disk"),
+                enable_hnsw=self._index_bool_option(options, "enable_hnsw"),
+            )
+
+        if options:
+            raise QQLRuntimeError(
+                f"CREATE INDEX type '{node.schema}' does not support advanced options yet"
+            )
+
+        schema_map = {
+            "keyword": PayloadSchemaType.KEYWORD,
+            "integer": PayloadSchemaType.INTEGER,
+            "float": PayloadSchemaType.FLOAT,
+            "bool": PayloadSchemaType.BOOL,
+            "text": PayloadSchemaType.TEXT,
+            "geo": PayloadSchemaType.GEO,
+            "datetime": PayloadSchemaType.DATETIME,
+            "uuid": PayloadSchemaType.UUID,
+        }
+        return schema_map[node.schema]
+
+    def _validate_index_option_keys(
+        self,
+        schema: str,
+        options: dict[str, Any],
+        allowed: set[str],
+    ) -> None:
+        unknown_keys = set(options) - allowed
+        if unknown_keys:
+            allowed_list = ", ".join(sorted(allowed))
+            raise QQLRuntimeError(
+                f"Unknown CREATE INDEX option '{sorted(unknown_keys)[0]}' for type '{schema}'. "
+                f"Expected one of: {allowed_list}"
+            )
+
+    def _index_bool_option(self, options: dict[str, Any], key: str) -> bool | None:
+        value = options.get(key)
+        if value is None:
+            return None
+        if not isinstance(value, bool):
+            raise QQLRuntimeError(f"CREATE INDEX option '{key}' must be a boolean")
+        return value
+
+    def _index_int_option(self, options: dict[str, Any], key: str) -> int | None:
+        value = options.get(key)
+        if value is None:
+            return None
+        if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+            raise QQLRuntimeError(
+                f"CREATE INDEX option '{key}' must be a positive integer"
+            )
+        return value
+
+    def _text_tokenizer_option(self, options: dict[str, Any]) -> TokenizerType | None:
+        value = options.get("tokenizer")
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise QQLRuntimeError("CREATE INDEX option 'tokenizer' must be a string")
+        tokenizer_map = {
+            "prefix": TokenizerType.PREFIX,
+            "whitespace": TokenizerType.WHITESPACE,
+            "word": TokenizerType.WORD,
+            "multilingual": TokenizerType.MULTILINGUAL,
+        }
+        try:
+            return tokenizer_map[value.lower()]
+        except KeyError as e:
+            raise QQLRuntimeError(
+                "CREATE INDEX option 'tokenizer' must be one of: "
+                "prefix, whitespace, word, multilingual"
+            ) from e
+
+    def _text_stopwords_option(
+        self, options: dict[str, Any]
+    ) -> Language | StopwordsSet | None:
+        value = options.get("stopwords")
+        if value is None:
+            return None
+        if isinstance(value, str):
+            try:
+                return Language(value.lower())
+            except ValueError as e:
+                raise QQLRuntimeError(
+                    "CREATE INDEX option 'stopwords' must be a known language name or a list of strings"
+                ) from e
+        if isinstance(value, list) and all(isinstance(item, str) for item in value):
+            return StopwordsSet(custom=value)
+        raise QQLRuntimeError(
+            "CREATE INDEX option 'stopwords' must be a string language name or a list of strings"
+        )
+
+    def _serialize_payload_index_info(self, idx_info: Any) -> dict[str, Any]:
+        params = idx_info.params
+        data = {"type": str(idx_info.data_type)}
+        if params is None or not hasattr(params, "model_dump"):
+            return data
+        details: dict[str, Any] = {}
+        for key, value in params.model_dump(exclude_none=True).items():
+            if key == "type":
+                continue
+            details[key] = self._serialize_payload_index_value(value)
+        if details:
+            data["params"] = details
+        return data
+
+    def _serialize_payload_index_value(self, value: Any) -> Any:
+        if hasattr(value, "value"):
+            return value.value
+        if isinstance(value, dict):
+            return {
+                key: self._serialize_payload_index_value(item)
+                for key, item in value.items()
+            }
+        if isinstance(value, list):
+            return [self._serialize_payload_index_value(item) for item in value]
+        return value
 
     def _build_search_params(self, with_clause: SearchWith | None) -> SearchParams | None:
         if with_clause is None:
