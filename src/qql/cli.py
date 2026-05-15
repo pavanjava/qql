@@ -70,7 +70,7 @@ Available statements:
       Optional: [yellow]WHERE[/yellow] <filter>   (e.g. WHERE year > 2020 AND status = 'ok')
       Optional: [yellow]RERANK[/yellow] [MODEL '<model>']   rerank results with a cross-encoder
       Optional: [yellow]EXACT[/yellow]   bypass HNSW and perform exact search
-      Optional: [yellow]WITH[/yellow] { hnsw_ef: <int>, exact: <bool>, acorn: <bool>, indexed_only: <bool>, quantization: { ignore: <bool>, rescore: <bool>, oversampling: <n> } }   search parameters
+      Optional: [yellow]WITH[/yellow] { hnsw_ef: <int>, exact: <bool>, acorn: <bool>, indexed_only: <bool>, quantization: { ignore: <bool>, rescore: <bool>, oversampling: <n> }, mmr_diversity: <0..1>, mmr_candidates: <int> }   search parameters
       Optional: [yellow]GROUP BY[/yellow] <field> [[yellow]GROUP_SIZE[/yellow] <n>]
                   Group results by a payload field value (default GROUP_SIZE: 3).
                   Field must be keyword or integer type. RERANK and GROUP BY cannot be combined.

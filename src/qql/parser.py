@@ -417,6 +417,8 @@ class Parser:
                     acorn=with_clause.acorn,
                     indexed_only=with_clause.indexed_only,
                     quantization=with_clause.quantization,
+                    mmr_diversity=with_clause.mmr_diversity,
+                    mmr_candidates=with_clause.mmr_candidates,
                 )
         if self._peek().kind == TokenKind.WITH:
             self._advance()  # consume WITH
@@ -430,6 +432,12 @@ class Parser:
                     acorn=parsed_with.acorn or with_clause.acorn,
                     indexed_only=parsed_with.indexed_only or with_clause.indexed_only,
                     quantization=parsed_with.quantization or with_clause.quantization,
+                    mmr_diversity=(
+                        parsed_with.mmr_diversity
+                        if parsed_with.mmr_diversity is not None
+                        else with_clause.mmr_diversity
+                    ),
+                    mmr_candidates=parsed_with.mmr_candidates or with_clause.mmr_candidates,
                 )
         group_by: str | None = None
         group_size: int = 3
@@ -964,6 +972,8 @@ class Parser:
         acorn: bool = False
         indexed_only: bool = False
         quantization: QuantizationSearchWith | None = None
+        mmr_diversity: float | None = None
+        mmr_candidates: int | None = None
         while self._peek().kind != TokenKind.RBRACE:
             key_tok = self._peek()
             if key_tok.kind not in (
@@ -988,10 +998,24 @@ class Parser:
                 indexed_only = self._parse_bool()
             elif key == "quantization":
                 quantization = self._parse_quantization_search_with()
+            elif key == "mmr_diversity":
+                mmr_diversity = float(self._parse_number())
+                if not 0.0 <= mmr_diversity <= 1.0:
+                    raise QQLSyntaxError(
+                        f"mmr_diversity must be between 0 and 1, got {mmr_diversity}",
+                        key_tok.pos,
+                    )
+            elif key == "mmr_candidates":
+                mmr_candidates = int(self._expect(TokenKind.INTEGER).value)
+                if mmr_candidates <= 0:
+                    raise QQLSyntaxError(
+                        f"mmr_candidates must be a positive integer, got {mmr_candidates}",
+                        key_tok.pos,
+                    )
             else:
                 raise QQLSyntaxError(
                     "Unknown WITH parameter "
-                    f"'{key}'. Expected: hnsw_ef, exact, acorn, indexed_only, quantization",
+                    f"'{key}'. Expected: hnsw_ef, exact, acorn, indexed_only, quantization, mmr_diversity, mmr_candidates",
                     key_tok.pos,
                 )
             if self._peek().kind == TokenKind.COMMA:
@@ -1007,6 +1031,8 @@ class Parser:
             acorn=acorn,
             indexed_only=indexed_only,
             quantization=quantization,
+            mmr_diversity=mmr_diversity,
+            mmr_candidates=mmr_candidates,
         )
 
     def _parse_quantization_search_with(self) -> QuantizationSearchWith:

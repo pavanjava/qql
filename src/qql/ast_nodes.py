@@ -29,6 +29,8 @@ class SearchWith:
     acorn: bool = False
     indexed_only: bool = False
     quantization: "QuantizationSearchWith | None" = None
+    mmr_diversity: float | None = None
+    mmr_candidates: int | None = None
 
 
 @dataclass(frozen=True)

@@ -939,6 +939,15 @@ class TestSearchWithClause:
         assert node.with_clause.quantization.rescore is False
         assert node.with_clause.quantization.oversampling == pytest.approx(2.0)
 
+    def test_with_mmr_params(self):
+        node = parse(
+            "SEARCH col SIMILAR TO 'q' LIMIT 5 "
+            "WITH { mmr_diversity: 0.5, mmr_candidates: 50 }"
+        )
+        assert node.with_clause is not None
+        assert node.with_clause.mmr_diversity == pytest.approx(0.5)
+        assert node.with_clause.mmr_candidates == 50
+
     def test_with_after_where(self):
         node = parse(
             "SEARCH col SIMILAR TO 'q' LIMIT 5 WHERE year > 2020 WITH { hnsw_ef: 128 }"
@@ -968,6 +977,14 @@ class TestSearchWithClause:
     def test_with_unknown_keyword_raises(self):
         with pytest.raises(QQLSyntaxError):
             parse("SEARCH col SIMILAR TO 'q' LIMIT 5 WITH { diversity: 0.5 }")
+
+    def test_with_mmr_diversity_out_of_range_raises(self):
+        with pytest.raises(QQLSyntaxError, match="mmr_diversity must be between 0 and 1"):
+            parse("SEARCH col SIMILAR TO 'q' LIMIT 5 WITH { mmr_diversity: 1.5 }")
+
+    def test_with_mmr_candidates_non_positive_raises(self):
+        with pytest.raises(QQLSyntaxError, match="mmr_candidates must be a positive integer"):
+            parse("SEARCH col SIMILAR TO 'q' LIMIT 5 WITH { mmr_candidates: 0 }")
 
     def test_with_trailing_comma(self):
         node = parse("SEARCH col SIMILAR TO 'q' LIMIT 5 WITH { hnsw_ef: 256, }")
@@ -1326,7 +1343,6 @@ class TestUpdateVector:
         assert all(isinstance(v, float) for v in node.vector)
 
     def test_update_vector_collection_stored(self):
-        from qql.ast_nodes import UpdateVectorStmt
         node = parse("UPDATE my_col SET VECTOR WHERE id = 99 [0.5]")
         assert node.collection == "my_col"
 
@@ -1399,7 +1415,6 @@ class TestUpdatePayload:
         assert node.payload["score"] == pytest.approx(0.99)
 
     def test_update_payload_collection_stored(self):
-        from qql.ast_nodes import UpdatePayloadStmt
         node = parse("UPDATE my_notes SET PAYLOAD WHERE id = 7 {'tag': 'ai'}")
         assert node.collection == "my_notes"
 

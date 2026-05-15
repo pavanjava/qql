@@ -17,7 +17,7 @@ SEARCH <collection_name> SIMILAR TO '<query_text>' LIMIT <n> USING HYBRID
 SEARCH <collection_name> SIMILAR TO '<query_text>' LIMIT <n> USING HYBRID [FUSION 'rrf|dbsf'] [DENSE MODEL '<model>'] [SPARSE MODEL '<model>'] [WHERE <filter>]
 SEARCH <collection_name> SIMILAR TO '<query_text>' LIMIT <n> USING SPARSE [MODEL '<sparse_model>']
 SEARCH <collection_name> SIMILAR TO '<query_text>' LIMIT <n> EXACT
-SEARCH <collection_name> SIMILAR TO '<query_text>' LIMIT <n> [USING ...] [WHERE <filter>] [RERANK] WITH { hnsw_ef: <n>, exact: true|false, acorn: true|false, indexed_only: true|false, quantization: { ignore: true|false, rescore: true|false, oversampling: <n> } }
+SEARCH <collection_name> SIMILAR TO '<query_text>' LIMIT <n> [USING ...] [WHERE <filter>] [RERANK] WITH { hnsw_ef: <n>, exact: true|false, acorn: true|false, indexed_only: true|false, quantization: { ignore: true|false, rescore: true|false, oversampling: <n> }, mmr_diversity: <0..1>, mmr_candidates: <n> }
 SEARCH <collection_name> SIMILAR TO '<query_text>' LIMIT <n> [USING ...] [WHERE <filter>] RERANK [MODEL '<reranker_model>']
 ```
 
@@ -53,6 +53,11 @@ SEARCH articles SIMILAR TO 'attention mechanism' LIMIT 10 EXACT
 Search with query-time HNSW tuning:
 ```sql
 SEARCH articles SIMILAR TO 'attention mechanism' LIMIT 10 WITH { hnsw_ef: 128 }
+```
+
+Search with native MMR diversification:
+```sql
+SEARCH articles SIMILAR TO 'attention mechanism' LIMIT 10 WITH { mmr_diversity: 0.5, mmr_candidates: 50 }
 ```
 
 **Output:**
@@ -104,10 +109,13 @@ Use these when you want to debug retrieval quality or tune recall without changi
 | `WITH { acorn: true }` | Enable ACORN for filtered queries |
 | `WITH { indexed_only: true }` | Restrict the query to indexed segments only |
 | `WITH { quantization: { ... } }` | Tune quantized-search behavior at query time |
+| `WITH { mmr_diversity: 0.5, mmr_candidates: 50 }` | Apply native MMR diversification after nearest-neighbor retrieval |
 
 - `EXACT` can appear after `LIMIT` or after `RERANK`
 - `WITH { ... }` can appear after `WHERE` and/or `RERANK`
-- Supported top-level `WITH` keys are `hnsw_ef`, `exact`, `acorn`, `indexed_only`, and `quantization`
+- Supported top-level `WITH` keys are `hnsw_ef`, `exact`, `acorn`, `indexed_only`, `quantization`, `mmr_diversity`, and `mmr_candidates`
+- MMR is currently supported for dense `SEARCH` and dense `SEARCH ... GROUP BY`
+- MMR is not yet supported with `USING HYBRID`, `USING SPARSE`, or `RECOMMEND`
 
 ```sql
 -- Exact KNN baseline
@@ -124,6 +132,9 @@ SEARCH articles SIMILAR TO 'retrieval' LIMIT 10 WITH { indexed_only: true }
 
 -- Quantized-search tuning
 SEARCH articles SIMILAR TO 'vector db' LIMIT 10 WITH { quantization: { ignore: true, oversampling: 2 } }
+
+-- Diversify top-k results with native MMR
+SEARCH articles SIMILAR TO 'retrieval systems' LIMIT 10 WITH { mmr_diversity: 0.5, mmr_candidates: 50 }
 ```
 
 ---

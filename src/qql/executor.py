@@ -27,7 +27,9 @@ from qdrant_client.models import (
     MatchText,
     MatchTextAny,
     MatchValue,
+    Mmr,
     Modifier,
+    NearestQuery,
     PayloadField,
     PayloadSchemaType,
     PointStruct,
@@ -602,6 +604,7 @@ class Executor:
             )
 
         search_params = self._build_search_params(node.with_clause)
+        self._validate_search_mmr_usage(node)
 
         # When reranking is requested, fetch more candidates so the reranker has
         # enough material to reorder; only `node.limit` results are returned.
@@ -712,7 +715,7 @@ class Executor:
             query_using = self._get_dense_vector_name(node.collection)
             response = self._client.query_points(
                 collection_name=node.collection,
-                query=vector,
+                query=self._build_dense_query(vector, node.with_clause),
                 using=query_using,
                 limit=fetch_limit,
                 query_filter=qdrant_filter,
@@ -790,6 +793,8 @@ class Executor:
         )
 
         search_params = self._build_search_params(node.with_clause)
+        if self._has_mmr(node.with_clause):
+            raise QQLRuntimeError("MMR is supported only for SEARCH statements")
 
         lookup_from: LookupLocation | None = None
         if node.lookup_from is not None:
@@ -840,6 +845,34 @@ class Executor:
             quantization=quantization,
             indexed_only=True if with_clause.indexed_only else None,
             acorn=AcornSearchParams(enable=True) if with_clause.acorn else None,
+        )
+
+    def _has_mmr(self, with_clause: SearchWith | None) -> bool:
+        return with_clause is not None and (
+            with_clause.mmr_diversity is not None or with_clause.mmr_candidates is not None
+        )
+
+    def _validate_search_mmr_usage(self, node: SearchStmt) -> None:
+        if not self._has_mmr(node.with_clause):
+            return
+        if node.hybrid:
+            raise QQLRuntimeError("MMR is not supported with USING HYBRID yet")
+        if node.sparse_only:
+            raise QQLRuntimeError("MMR is not supported with USING SPARSE yet")
+
+    def _build_dense_query(
+        self,
+        vector: list[float],
+        with_clause: SearchWith | None,
+    ) -> list[float] | NearestQuery:
+        if not self._has_mmr(with_clause):
+            return vector
+        return NearestQuery(
+            nearest=vector,
+            mmr=Mmr(
+                diversity=with_clause.mmr_diversity,
+                candidates_limit=with_clause.mmr_candidates,
+            ),
         )
 
     def _parse_recommend_strategy(
@@ -1029,7 +1062,7 @@ class Executor:
                 response = self._client.query_points_groups(
                     collection_name=node.collection,
                     group_by=node.group_by,
-                    query=vector,
+                    query=self._build_dense_query(vector, node.with_clause),
                     using=query_using,
                     limit=node.limit,
                     group_size=node.group_size,

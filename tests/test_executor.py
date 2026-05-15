@@ -811,6 +811,55 @@ class TestSearch:
 
         assert mock_client.query_points.call_args.kwargs["using"] == "dense"
 
+    def test_dense_search_with_mmr_uses_nearest_query(self, executor, mock_client, mocker):
+        from qdrant_client.models import NearestQuery
+
+        mock_client.collection_exists.return_value = True
+        mock_response = mocker.MagicMock()
+        mock_response.points = []
+        mock_client.query_points.return_value = mock_response
+
+        node = SearchStmt(
+            collection="notes",
+            query_text="hello",
+            limit=5,
+            model=None,
+            with_clause=SearchWith(mmr_diversity=0.4, mmr_candidates=25),
+        )
+        executor.execute(node)
+
+        query = mock_client.query_points.call_args.kwargs["query"]
+        assert isinstance(query, NearestQuery)
+        assert query.mmr is not None
+        assert query.mmr.diversity == pytest.approx(0.4)
+        assert query.mmr.candidates_limit == 25
+
+    def test_hybrid_search_with_mmr_raises(self, executor, mock_client):
+        mock_client.collection_exists.return_value = True
+        node = SearchStmt(
+            collection="notes",
+            query_text="hello",
+            limit=5,
+            model=None,
+            hybrid=True,
+            with_clause=SearchWith(mmr_diversity=0.5),
+        )
+        with pytest.raises(QQLRuntimeError, match="MMR is not supported with USING HYBRID yet"):
+            executor.execute(node)
+
+    def test_sparse_search_with_mmr_raises(self, executor, mock_client):
+        mock_client.collection_exists.return_value = True
+        node = SearchStmt(
+            collection="notes",
+            query_text="hello",
+            limit=5,
+            model=None,
+            sparse_only=True,
+            with_clause=SearchWith(mmr_diversity=0.5),
+        )
+        with pytest.raises(QQLRuntimeError, match="MMR is not supported with USING SPARSE yet"):
+            executor.execute(node)
+
 
 class TestRecommend:
     def test_recommend_calls_qdrant_query_points(self, executor, mock_client, mocker):
@@ -1025,6 +1074,17 @@ class TestRecommend:
         assert search_params.indexed_only is True
         assert search_params.quantization is not None
         assert search_params.quantization.rescore is True
+
+    def test_recommend_with_mmr_raises(self, executor, mock_client):
+        mock_client.collection_exists.return_value = True
+        node = RecommendStmt(
+            collection="notes",
+            positive_ids=("a",),
+            limit=5,
+            with_clause=SearchWith(mmr_diversity=0.5),
+        )
+        with pytest.raises(QQLRuntimeError, match="MMR is supported only for SEARCH statements"):
+            executor.execute(node)
 
     def test_recommend_offset_zero_passes_none(self, executor, mock_client, mocker):
         mock_client.collection_exists.return_value = True
@@ -2268,11 +2328,34 @@ class TestSearchGroupBy:
             collection="articles", query_text="q", limit=3, model=None,
             hybrid=True, group_by="category", group_size=2,
         )
-        result = executor.execute(node)
+        executor.execute(node)
         mock_client.query_points_groups.assert_called_once()
         kwargs = mock_client.query_points_groups.call_args.kwargs
         assert kwargs["group_by"] == "category"
         assert "prefetch" in kwargs
+
+    def test_group_by_dense_with_mmr_uses_nearest_query(self, executor, mock_client, mocker):
+        from qdrant_client.models import NearestQuery
+
+        mock_client.collection_exists.return_value = True
+        mock_response = mocker.MagicMock()
+        mock_response.groups = []
+        mock_client.query_points_groups.return_value = mock_response
+
+        node = SearchStmt(
+            collection="articles",
+            query_text="ai",
+            limit=5,
+            model=None,
+            group_by="category",
+            with_clause=SearchWith(mmr_diversity=0.35, mmr_candidates=40),
+        )
+        executor.execute(node)
+        query = mock_client.query_points_groups.call_args.kwargs["query"]
+        assert isinstance(query, NearestQuery)
+        assert query.mmr is not None
+        assert query.mmr.diversity == pytest.approx(0.35)
+        assert query.mmr.candidates_limit == 40
 
 
 class TestUpdateVector:
@@ -2288,7 +2371,6 @@ class TestUpdateVector:
 
     def test_update_vector_passes_correct_point_id(self, executor, mock_client):
         from qql.ast_nodes import UpdateVectorStmt
-        from qdrant_client.models import PointVectors
         mock_client.collection_exists.return_value = True
         mock_client.get_collection.return_value.config.params.vectors = {}  # non-dict → unnamed
         node = UpdateVectorStmt(
@@ -2480,7 +2562,6 @@ class TestUpdateVectorVectorShape:
         from qql.ast_nodes import UpdateVectorStmt
         mock_client.collection_exists.return_value = True
         # Unnamed collection: get_collection returns non-dict vectors
-        mock_vectors = mocker.MagicMock() if False else type("V", (), {})()
         info = mock_client.get_collection.return_value
         info.config.params.vectors = [None]  # list → not a dict → unnamed
 

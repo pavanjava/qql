@@ -102,6 +102,7 @@ INSERT BULK INTO COLLECTION articles VALUES [{'text': '...'}, {'text': '...'}]
 SEARCH articles SIMILAR TO 'query' LIMIT 10
 SEARCH articles SIMILAR TO 'query' LIMIT 10 WHERE year >= 2020
 SEARCH articles SIMILAR TO 'query' LIMIT 10 WHERE active = true
+SEARCH articles SIMILAR TO 'query' LIMIT 10 WITH { mmr_diversity: 0.5, mmr_candidates: 50 }
 SEARCH articles SIMILAR TO 'query' LIMIT 10 USING HYBRID
 SEARCH articles SIMILAR TO 'query' LIMIT 10 USING HYBRID FUSION 'dbsf'
 SEARCH articles SIMILAR TO 'query' LIMIT 10 WITH { indexed_only: true }
