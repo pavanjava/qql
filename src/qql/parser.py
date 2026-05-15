@@ -26,6 +26,7 @@ from .ast_nodes import (
     QuantizationSearchWith,
     QuantizationConfig,
     QuantizationType,
+    QuantizationSearchWith,
     RecommendStmt,
     SelectStmt,
     ScrollStmt,

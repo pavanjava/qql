@@ -22,6 +22,7 @@ from qql.ast_nodes import (
     NotInExpr,
     OrExpr,
     QuantizationType,
+    QuantizationSearchWith,
     RecommendStmt,
     SelectStmt,
     ScrollStmt,
@@ -916,13 +917,6 @@ class TestSearchWithClause:
         assert node.with_clause is not None
         assert node.with_clause.acorn is True
 
-    def test_with_multiple_params(self):
-        node = parse(
-            "SEARCH col SIMILAR TO 'q' LIMIT 5 WITH { hnsw_ef: 256, acorn: true }"
-        )
-        assert node.with_clause.hnsw_ef == 256
-        assert node.with_clause.acorn is True
-
     def test_with_indexed_only(self):
         node = parse("SEARCH col SIMILAR TO 'q' LIMIT 5 WITH { indexed_only: true }")
         assert node.with_clause is not None
@@ -938,6 +932,13 @@ class TestSearchWithClause:
         assert node.with_clause.quantization.ignore is True
         assert node.with_clause.quantization.rescore is False
         assert node.with_clause.quantization.oversampling == pytest.approx(2.0)
+
+    def test_with_multiple_params(self):
+        node = parse(
+            "SEARCH col SIMILAR TO 'q' LIMIT 5 WITH { hnsw_ef: 256, acorn: true }"
+        )
+        assert node.with_clause.hnsw_ef == 256
+        assert node.with_clause.acorn is True
 
     def test_with_mmr_params(self):
         node = parse(
@@ -985,6 +986,10 @@ class TestSearchWithClause:
     def test_with_mmr_candidates_non_positive_raises(self):
         with pytest.raises(QQLSyntaxError, match="mmr_candidates must be a positive integer"):
             parse("SEARCH col SIMILAR TO 'q' LIMIT 5 WITH { mmr_candidates: 0 }")
+
+    def test_with_quantization_unknown_key_raises(self):
+        with pytest.raises(QQLSyntaxError):
+            parse("SEARCH col SIMILAR TO 'q' LIMIT 5 WITH { quantization: { unknown: true } }")
 
     def test_with_trailing_comma(self):
         node = parse("SEARCH col SIMILAR TO 'q' LIMIT 5 WITH { hnsw_ef: 256, }")

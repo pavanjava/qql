@@ -107,8 +107,7 @@ Use these when you want to debug retrieval quality or tune recall without changi
 | `WITH { hnsw_ef: 128 }` | Increase HNSW exploration at query time |
 | `WITH { exact: true }` | Force exact KNN explicitly |
 | `WITH { acorn: true }` | Enable ACORN for filtered queries |
-| `WITH { indexed_only: true }` | Restrict the query to indexed segments only |
-| `WITH { quantization: { ... } }` | Tune quantized-search behavior at query time |
+| `WITH { indexed_only: true, quantization: { rescore: true } }` | Prefer indexed vectors and apply quantization controls |
 | `WITH { mmr_diversity: 0.5, mmr_candidates: 50 }` | Apply native MMR diversification after nearest-neighbor retrieval |
 
 - `EXACT` can appear after `LIMIT` or after `RERANK`

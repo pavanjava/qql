@@ -792,7 +792,6 @@ class TestSearch:
         search_params = mock_client.query_points.call_args.kwargs["search_params"]
         assert search_params.exact is True
         assert search_params.indexed_only is True
-
     def test_dense_search_against_hybrid_collection_uses_dense_vector_name(
         self, executor, mock_client, mocker
     ):
