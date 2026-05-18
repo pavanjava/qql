@@ -139,7 +139,7 @@ with Connection("http://localhost:6333") as conn:
     # Inspect collection diagnostics
     result = conn.run_query("SHOW COLLECTION notes")
     print(result.data["topology"])         # "dense" or "hybrid"
-    print(result.data["vectors"])          # {"": {...}} or {"dense": {...}}
+    print(result.data["vectors"])          # named vectors, or {"": {...}} for unnamed external collections
     print(result.data["payload_schema"])   # field index info, or None
 ```
 
@@ -150,6 +150,8 @@ with Connection("http://localhost:6333") as conn:
 | `url` | `str` | `"http://localhost:6333"` | Qdrant instance URL |
 | `secret` | `str \| None` | `None` | API key; `None` for unauthenticated |
 | `default_model` | `str \| None` | `None` → `sentence-transformers/all-MiniLM-L6-v2` | Dense embedding model used when no `USING MODEL` clause is given |
+| `default_dense_vector_name` | `str` | `"dense"` | Dense vector name used when QQL creates a collection and no explicit `USING VECTOR` name is given |
+| `default_sparse_vector_name` | `str` | `"sparse"` | Sparse vector name used when QQL creates a hybrid collection and no explicit sparse vector name is given |
 
 ### Power-user: `executor` property
 

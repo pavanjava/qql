@@ -171,7 +171,7 @@ class TestDumpCollection:
         client = _make_client(mocker, hybrid=True, points=[{"text": "hello"}])
         dump_collection("col", out, client, null_console(), null_console())
         content = (tmp_path / "dump.qql").read_text()
-        assert "CREATE COLLECTION col HYBRID" in content
+        assert "CREATE COLLECTION col USING HYBRID DENSE VECTOR 'dense' SPARSE VECTOR 'sparse'" in content
 
     def test_writes_collection_config_and_quantization(self, tmp_path, mocker):
         from qdrant_client.models import (
@@ -213,7 +213,7 @@ class TestDumpCollection:
         client = _make_client(mocker, hybrid=True, points=[{"text": "hello"}])
         dump_collection("col", out, client, null_console(), null_console())
         content = (tmp_path / "dump.qql").read_text()
-        assert "] USING HYBRID" in content
+        assert "] USING HYBRID DENSE VECTOR 'dense' SPARSE VECTOR 'sparse'" in content
 
     def test_dense_insert_bulk_has_no_using_clause(self, tmp_path, mocker):
         out = str(tmp_path / "dump.qql")

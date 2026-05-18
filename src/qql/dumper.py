@@ -77,6 +77,48 @@ def _is_hybrid(collection: str, client: QdrantClient) -> bool:
     return isinstance(sparse_vectors, dict) and bool(sparse_vectors)
 
 
+def _single_named_vector_name(names: list[str], kind: str) -> str:
+    if len(names) == 1:
+        return names[0]
+    if not names:
+        raise ValueError(f"Collection has no {kind} vector to dump")
+    raise ValueError(
+        f"Collection has multiple {kind} vectors; QQL dump requires explicit single-vector topology"
+    )
+
+
+def _dense_vector_config(info: Any) -> Any:
+    vectors = info.config.params.vectors  # type: ignore[union-attr]
+    if isinstance(vectors, dict):
+        return vectors[_single_named_vector_name(list(vectors.keys()), "dense")]
+    return vectors
+
+
+def _create_using_clause(info: Any, hybrid: bool) -> str:
+    params = info.config.params
+    vectors = params.vectors  # type: ignore[union-attr]
+    sparse_vectors = params.sparse_vectors or {}
+
+    dense_name: str | None = None
+    if isinstance(vectors, dict):
+        dense_name = _single_named_vector_name(list(vectors.keys()), "dense")
+
+    sparse_name: str | None = None
+    if isinstance(sparse_vectors, dict) and sparse_vectors:
+        sparse_name = _single_named_vector_name(list(sparse_vectors.keys()), "sparse")
+
+    if hybrid:
+        parts = [" USING HYBRID"]
+        if dense_name is not None:
+            parts.append(f" DENSE VECTOR {_serialize_value(dense_name)}")
+        if sparse_name is not None:
+            parts.append(f" SPARSE VECTOR {_serialize_value(sparse_name)}")
+        return "".join(parts)
+    if dense_name is not None:
+        return f" USING VECTOR {_serialize_value(dense_name)}"
+    return ""
+
+
 def _quantization_clause(info: Any) -> str:
     quant = info.config.quantization_config
     if quant is None:
@@ -118,8 +160,7 @@ def _quantization_clause(info: Any) -> str:
 def _config_clauses(info: Any) -> str:
     clauses: list[str] = []
     params = info.config.params
-    vectors = params.vectors  # type: ignore[union-attr]
-    dense_vectors = vectors.get("dense") if isinstance(vectors, dict) else vectors
+    dense_vectors = _dense_vector_config(info)
     if dense_vectors is not None and getattr(dense_vectors, "on_disk", None) is not None:
         clauses.append(f"WITH VECTORS {{ on_disk: {'true' if dense_vectors.on_disk else 'false'} }}")
 
@@ -211,7 +252,7 @@ def dump_collection(
     sparse_vectors = info.config.params.sparse_vectors
     hybrid = isinstance(sparse_vectors, dict) and bool(sparse_vectors)
     col_type = "hybrid (dense + sparse)" if hybrid else "dense"
-    using_clause = " USING HYBRID" if hybrid else ""
+    using_clause = _create_using_clause(info, hybrid)
 
     # ── First pass: count total points for the header ─────────────────────
     count_info = client.count(collection_name=collection, exact=True)
@@ -248,11 +289,10 @@ def dump_collection(
         )
 
         # ── CREATE statement ──────────────────────────────────────────────
-        hybrid_suffix = " HYBRID" if hybrid else ""
         config_suffix = _config_clauses(info)
         quantization_suffix = _quantization_clause(info)
         f.write(
-            f"CREATE COLLECTION {collection}{hybrid_suffix}{config_suffix}{quantization_suffix}\n\n"
+            f"CREATE COLLECTION {collection}{using_clause}{config_suffix}{quantization_suffix}\n\n"
         )
 
         # ── Paginate and write INSERT BULK batches ────────────────────────

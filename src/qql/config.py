@@ -8,6 +8,8 @@ CONFIG_DIR = Path.home() / ".qql"
 CONFIG_PATH = CONFIG_DIR / "config.json"
 
 DEFAULT_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+DEFAULT_DENSE_VECTOR_NAME = "dense"
+DEFAULT_SPARSE_VECTOR_NAME = "sparse"
 
 
 @dataclass
@@ -15,6 +17,8 @@ class QQLConfig:
     url: str
     secret: str | None = None
     default_model: str = DEFAULT_MODEL
+    default_dense_vector_name: str = DEFAULT_DENSE_VECTOR_NAME
+    default_sparse_vector_name: str = DEFAULT_SPARSE_VECTOR_NAME
 
 
 def save_config(cfg: QQLConfig) -> None:
@@ -33,6 +37,12 @@ def load_config() -> QQLConfig | None:
         url=data["url"],
         secret=data.get("secret"),
         default_model=data.get("default_model", DEFAULT_MODEL),
+        default_dense_vector_name=data.get(
+            "default_dense_vector_name", DEFAULT_DENSE_VECTOR_NAME
+        ),
+        default_sparse_vector_name=data.get(
+            "default_sparse_vector_name", DEFAULT_SPARSE_VECTOR_NAME
+        ),
     )
 
 

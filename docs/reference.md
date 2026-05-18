@@ -33,6 +33,10 @@ Qdrant/bm25
 INSERT INTO docs VALUES {'text': 'hello'} USING MODEL 'BAAI/bge-small-en-v1.5'
 SEARCH docs SIMILAR TO 'hello' LIMIT 5 USING MODEL 'BAAI/bge-small-en-v1.5'
 
+-- Explicit vector names
+INSERT INTO docs VALUES {'text': 'hello'} USING VECTOR 'body'
+SEARCH docs SIMILAR TO 'hello' LIMIT 5 USING VECTOR 'body'
+
 -- Hybrid with custom dense model
 SEARCH docs SIMILAR TO 'hello' LIMIT 5 USING HYBRID DENSE MODEL 'BAAI/bge-base-en-v1.5'
 
@@ -42,6 +46,10 @@ SEARCH docs SIMILAR TO 'hello' LIMIT 5 USING HYBRID FUSION 'dbsf'
 -- Hybrid with both custom
 SEARCH docs SIMILAR TO 'hello' LIMIT 5
   USING HYBRID DENSE MODEL 'BAAI/bge-base-en-v1.5' SPARSE MODEL 'prithivida/Splade_PP_en_v1'
+
+-- Hybrid with external vector names
+SEARCH docs SIMILAR TO 'hello' LIMIT 5
+  USING HYBRID DENSE VECTOR 'emb' SPARSE VECTOR 'lex'
 ```
 
 ### Commonly available dense models (Fastembed)

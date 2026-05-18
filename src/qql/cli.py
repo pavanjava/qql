@@ -27,7 +27,8 @@ Available statements:
       Insert a point. 'text' is required and auto-vectorized.
       Optional: include [yellow]'id'[/yellow] in VALUES as an integer or UUID
       Optional: [yellow]USING MODEL[/yellow] '<model>'
-      Optional: [yellow]USING HYBRID[/yellow] [DENSE MODEL '<model>'] [SPARSE MODEL '<model>']
+      Optional: [yellow]USING VECTOR[/yellow] '<dense_vector>'
+      Optional: [yellow]USING HYBRID[/yellow] [DENSE MODEL '<model>'] [DENSE VECTOR '<name>'] [SPARSE MODEL '<model>'] [SPARSE VECTOR '<name>']
 
   [yellow]INSERT BULK INTO COLLECTION[/yellow] <name> [yellow]VALUES[/yellow] [{[yellow]'text'[/yellow]: '...', ...}, ...]
       Batch insert multiple points in a single call. Each dict must contain 'text'.
@@ -37,7 +38,8 @@ Available statements:
   [yellow]CREATE COLLECTION[/yellow] <name> [[yellow]HYBRID[/yellow]]
       Create a new collection. Add HYBRID for dense+sparse BM25 vectors.
       Optional: [yellow]USING MODEL[/yellow] '<model>'
-      Optional: [yellow]USING HYBRID[/yellow] [DENSE MODEL '<model>']
+      Optional: [yellow]USING VECTOR[/yellow] '<dense_vector>'
+      Optional: [yellow]USING HYBRID[/yellow] [DENSE MODEL '<model>'] [DENSE VECTOR '<name>'] [SPARSE VECTOR '<name>']
       Optional: [yellow]WITH VECTORS[/yellow] { on_disk: <bool> }
       Optional: [yellow]WITH HNSW[/yellow] { m, ef_construct, full_scan_threshold, max_indexing_threads, on_disk, payload_m, inline_storage }
       Optional: [yellow]WITH OPTIMIZERS[/yellow] { deleted_threshold, vacuum_min_vector_number, default_segment_number, max_segment_size, memmap_threshold, indexing_threshold, flush_interval_sec, max_optimization_threads, prevent_unoptimized }
@@ -87,8 +89,9 @@ Available statements:
   [yellow]SEARCH[/yellow] <name> [yellow]SIMILAR TO[/yellow] '<text>' [yellow]LIMIT[/yellow] <n>
       Semantic search by vector similarity.
       Optional: [yellow]USING MODEL[/yellow] '<model>'
-      Optional: [yellow]USING HYBRID[/yellow] [FUSION 'rrf|dbsf'] [DENSE MODEL '<model>'] [SPARSE MODEL '<model>']
-      Optional: [yellow]USING SPARSE[/yellow] [MODEL '<model>']   sparse-vector-only search
+      Optional: [yellow]USING VECTOR[/yellow] '<dense_vector>'
+      Optional: [yellow]USING HYBRID[/yellow] [FUSION 'rrf|dbsf'] [DENSE MODEL '<model>'] [DENSE VECTOR '<name>'] [SPARSE MODEL '<model>'] [SPARSE VECTOR '<name>']
+      Optional: [yellow]USING SPARSE[/yellow] [MODEL '<model>'] [VECTOR '<name>']   sparse-vector-only search
       Optional: [yellow]WHERE[/yellow] <filter>   (e.g. WHERE year > 2020 AND status = 'ok')
       Optional: [yellow]RERANK[/yellow] [MODEL '<model>']   rerank results with a cross-encoder
       Optional: [yellow]EXACT[/yellow]   bypass HNSW and perform exact search
@@ -107,7 +110,7 @@ Available statements:
   [yellow]DELETE FROM[/yellow] <name> [yellow]WHERE id =[/yellow] '<id>'
       Delete a point by its ID.
 
-  [yellow]UPDATE[/yellow] <name> [yellow]SET VECTOR WHERE id =[/yellow] '<id>'|<int> [<vector>]
+  [yellow]UPDATE[/yellow] <name> [yellow]SET VECTOR[/yellow] ['<dense_vector>'] [yellow]WHERE id =[/yellow] '<id>'|<int> [<vector>]
       Replace the dense vector for a single point by ID.
       The point must already exist. Vector is a float array: [0.1, 0.2, ..., 0.N]
 

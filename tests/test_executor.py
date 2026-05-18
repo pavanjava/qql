@@ -293,7 +293,7 @@ class TestCreate:
         )
         executor.execute(node)
         kw = mock_client.create_collection.call_args.kwargs
-        assert kw["vectors_config"].on_disk is True
+        assert kw["vectors_config"]["dense"].on_disk is True
         assert kw["hnsw_config"].m == 32
         assert kw["hnsw_config"].ef_construct == 200
         assert kw["hnsw_config"].full_scan_threshold == 5000
@@ -368,11 +368,11 @@ class TestCreate:
         kw = mock_client.update_collection.call_args.kwargs
         assert kw["quantization_config"].value == "Disabled"
 
-    def test_collection_is_hybrid_depends_on_sparse_vectors(self, executor, mock_client, mocker):
+    def test_resolved_topology_depends_on_sparse_vectors(self, executor, mock_client, mocker):
         mock_client.collection_exists.return_value = True
         mock_client.get_collection.return_value.config.params.vectors = {"dense": object()}
         mock_client.get_collection.return_value.config.params.sparse_vectors = None
-        assert executor._collection_is_hybrid("named_dense") is False
+        assert executor._resolve_topology("named_dense").is_hybrid is False
 
     def test_insert_named_dense_collection_uses_named_vector_payload(self, executor, mock_client):
         mock_client.collection_exists.return_value = True
@@ -519,7 +519,8 @@ class TestCreateWithModel:
         node = CreateCollectionStmt(collection="col", model="BAAI/bge-base-en-v1.5")
         executor.execute(node)
         kw = mock_client.create_collection.call_args.kwargs
-        assert isinstance(kw["vectors_config"], VectorParams)
+        assert isinstance(kw["vectors_config"], dict)
+        assert isinstance(kw["vectors_config"]["dense"], VectorParams)
         assert "sparse_vectors_config" not in kw
 
     def test_create_existing_noop_with_model(self, executor, mock_client):
@@ -1034,7 +1035,7 @@ class TestSearch:
         assert search_params.quantization.oversampling == pytest.approx(2.5)
 
     def test_sparse_search_forwards_search_params(self, executor, mock_client, mocker):
-        mock_client.collection_exists.return_value = True
+        _mock_hybrid_collection(mock_client)
         mock_response = mocker.MagicMock()
         mock_response.points = []
         mock_client.query_points.return_value = mock_response
@@ -1616,6 +1617,33 @@ def mock_sparse_embedder(mocker):
     return mock
 
 
+def _mock_named_dense_collection(mock_client, name: str = "dense", size: int = 384):
+    from qdrant_client.models import Distance, VectorParams
+
+    mock_client.collection_exists.return_value = True
+    mock_client.get_collection.return_value.config.params.vectors = {
+        name: VectorParams(size=size, distance=Distance.COSINE)
+    }
+    mock_client.get_collection.return_value.config.params.sparse_vectors = None
+
+
+def _mock_hybrid_collection(
+    mock_client,
+    dense_name: str = "dense",
+    sparse_name: str = "sparse",
+    size: int = 384,
+):
+    from qdrant_client.models import Distance, SparseVectorParams, VectorParams
+
+    mock_client.collection_exists.return_value = True
+    mock_client.get_collection.return_value.config.params.vectors = {
+        dense_name: VectorParams(size=size, distance=Distance.COSINE)
+    }
+    mock_client.get_collection.return_value.config.params.sparse_vectors = {
+        sparse_name: SparseVectorParams()
+    }
+
+
 class TestHybridCreate:
     def test_create_hybrid_uses_named_vector_config(self, executor, mock_client):
         node = CreateCollectionStmt(collection="articles", hybrid=True)
@@ -1641,15 +1669,28 @@ class TestHybridCreate:
         node = CreateCollectionStmt(collection="col", hybrid=False)
         executor.execute(node)
         kw = mock_client.create_collection.call_args.kwargs
-        assert isinstance(kw["vectors_config"], VectorParams)
+        assert isinstance(kw["vectors_config"], dict)
+        assert isinstance(kw["vectors_config"]["dense"], VectorParams)
         assert "sparse_vectors_config" not in kw
+
+    def test_create_uses_explicit_vector_names(self, executor, mock_client):
+        node = CreateCollectionStmt(
+            collection="col",
+            hybrid=True,
+            dense_vector="emb",
+            sparse_vector="lex",
+        )
+        executor.execute(node)
+        kw = mock_client.create_collection.call_args.kwargs
+        assert "emb" in kw["vectors_config"]
+        assert "lex" in kw["sparse_vectors_config"]
 
 
 class TestHybridInsert:
     def test_hybrid_insert_upsert_has_named_vectors(
         self, executor, mock_client, mock_sparse_embedder
     ):
-        mock_client.collection_exists.return_value = True
+        _mock_hybrid_collection(mock_client)
         node = InsertStmt(
             collection="col", values={"text": "hello"}, model=None, hybrid=True
         )
@@ -1666,7 +1707,7 @@ class TestHybridInsert:
     ):
         from qdrant_client.models import SparseVector
 
-        mock_client.collection_exists.return_value = True
+        _mock_hybrid_collection(mock_client)
         node = InsertStmt(
             collection="col", values={"text": "hello"}, model=None, hybrid=True
         )
@@ -1689,7 +1730,7 @@ class TestHybridInsert:
     def test_hybrid_insert_skips_create_when_exists(
         self, executor, mock_client, mock_sparse_embedder
     ):
-        mock_client.collection_exists.return_value = True
+        _mock_hybrid_collection(mock_client)
         node = InsertStmt(
             collection="col", values={"text": "hello"}, model=None, hybrid=True
         )
@@ -1699,7 +1740,7 @@ class TestHybridInsert:
     def test_hybrid_insert_uses_custom_dense_model(
         self, executor, mock_client, mock_sparse_embedder, mocker
     ):
-        mock_client.collection_exists.return_value = True
+        _mock_hybrid_collection(mock_client)
         node = InsertStmt(
             collection="col", values={"text": "hi"}, model="BAAI/bge-small-en-v1.5",
             hybrid=True,
@@ -1713,7 +1754,7 @@ class TestHybridInsert:
     def test_hybrid_insert_uses_custom_sparse_model(
         self, executor, mock_client, mocker
     ):
-        mock_client.collection_exists.return_value = True
+        _mock_hybrid_collection(mock_client)
         mock_sparse = mocker.MagicMock()
         mock_sparse.embed.return_value = FAKE_SPARSE
         sparse_cls = mocker.patch("qql.executor.SparseEmbedder", return_value=mock_sparse)
@@ -1724,13 +1765,24 @@ class TestHybridInsert:
         executor.execute(node)
         sparse_cls.assert_called_once_with("prithivida/Splade_PP_en_v1")
 
+    def test_hybrid_insert_uses_external_vector_names(
+        self, executor, mock_client, mock_sparse_embedder
+    ):
+        _mock_hybrid_collection(mock_client, dense_name="emb", sparse_name="lex")
+        node = InsertStmt(
+            collection="col", values={"text": "hello"}, model=None, hybrid=True
+        )
+        executor.execute(node)
+        point = mock_client.upsert.call_args.kwargs["points"][0]
+        assert set(point.vector) == {"emb", "lex"}
+
     def test_non_hybrid_insert_uses_flat_vector(self, executor, mock_client):
         node = InsertStmt(
             collection="col", values={"text": "hello"}, model=None, hybrid=False
         )
         executor.execute(node)
         point = mock_client.upsert.call_args.kwargs["points"][0]
-        assert isinstance(point.vector, list)
+        assert point.vector == {"dense": FAKE_VECTOR}
 
     def test_hybrid_insert_missing_text_raises(
         self, executor, mock_client, mock_sparse_embedder
@@ -1743,10 +1795,13 @@ class TestHybridInsert:
 
 
 class TestHybridSearch:
+    @pytest.fixture(autouse=True)
+    def _collection(self, mock_client):
+        _mock_hybrid_collection(mock_client)
+
     def test_hybrid_search_uses_prefetch(
         self, executor, mock_client, mock_sparse_embedder, mocker
     ):
-        mock_client.collection_exists.return_value = True
         mock_resp = mocker.MagicMock()
         mock_resp.points = []
         mock_client.query_points.return_value = mock_resp
@@ -1767,7 +1822,6 @@ class TestHybridSearch:
     ):
         from qdrant_client.models import Fusion, FusionQuery
 
-        mock_client.collection_exists.return_value = True
         mock_resp = mocker.MagicMock()
         mock_resp.points = []
         mock_client.query_points.return_value = mock_resp
@@ -1785,7 +1839,6 @@ class TestHybridSearch:
     ):
         from qdrant_client.models import Fusion, FusionQuery
 
-        mock_client.collection_exists.return_value = True
         mock_resp = mocker.MagicMock()
         mock_resp.points = []
         mock_client.query_points.return_value = mock_resp
@@ -1806,7 +1859,6 @@ class TestHybridSearch:
     def test_hybrid_search_prefetch_limit_is_4x(
         self, executor, mock_client, mock_sparse_embedder, mocker
     ):
-        mock_client.collection_exists.return_value = True
         mock_resp = mocker.MagicMock()
         mock_resp.points = []
         mock_client.query_points.return_value = mock_resp
@@ -1821,7 +1873,6 @@ class TestHybridSearch:
     def test_hybrid_search_prefetch_using_fields(
         self, executor, mock_client, mock_sparse_embedder, mocker
     ):
-        mock_client.collection_exists.return_value = True
         mock_resp = mocker.MagicMock()
         mock_resp.points = []
         mock_client.query_points.return_value = mock_resp
@@ -1834,10 +1885,60 @@ class TestHybridSearch:
         usings = {p.using for p in prefetches}
         assert usings == {"dense", "sparse"}
 
+    def test_hybrid_search_uses_external_vector_names(
+        self, executor, mock_client, mock_sparse_embedder, mocker
+    ):
+        _mock_hybrid_collection(mock_client, dense_name="emb", sparse_name="lex")
+        mock_resp = mocker.MagicMock()
+        mock_resp.points = []
+        mock_client.query_points.return_value = mock_resp
+
+        node = SearchStmt(
+            collection="col", query_text="q", limit=5, model=None, hybrid=True
+        )
+        executor.execute(node)
+        prefetches = mock_client.query_points.call_args.kwargs["prefetch"]
+        assert {p.using for p in prefetches} == {"emb", "lex"}
+
+    def test_dense_search_requires_explicit_name_for_ambiguous_collection(
+        self, executor, mock_client, mocker
+    ):
+        from qdrant_client.models import Distance, VectorParams
+
+        mock_client.collection_exists.return_value = True
+        mock_client.get_collection.return_value.config.params.vectors = {
+            "title": VectorParams(size=384, distance=Distance.COSINE),
+            "body": VectorParams(size=384, distance=Distance.COSINE),
+        }
+        mock_client.get_collection.return_value.config.params.sparse_vectors = None
+        node = SearchStmt(collection="col", query_text="q", limit=5, model=None)
+        with pytest.raises(QQLRuntimeError, match="multiple dense vectors"):
+            executor.execute(node)
+
+    def test_dense_search_explicit_vector_resolves_ambiguous_collection(
+        self, executor, mock_client, mocker
+    ):
+        from qdrant_client.models import Distance, VectorParams
+
+        mock_client.collection_exists.return_value = True
+        mock_client.get_collection.return_value.config.params.vectors = {
+            "title": VectorParams(size=384, distance=Distance.COSINE),
+            "body": VectorParams(size=384, distance=Distance.COSINE),
+        }
+        mock_client.get_collection.return_value.config.params.sparse_vectors = None
+        mock_resp = mocker.MagicMock()
+        mock_resp.points = []
+        mock_client.query_points.return_value = mock_resp
+
+        node = SearchStmt(
+            collection="col", query_text="q", limit=5, model=None, dense_vector="body"
+        )
+        executor.execute(node)
+        assert mock_client.query_points.call_args.kwargs["using"] == "body"
+
     def test_hybrid_search_forwards_search_params_to_prefetch(
         self, executor, mock_client, mock_sparse_embedder, mocker
     ):
-        mock_client.collection_exists.return_value = True
         mock_resp = mocker.MagicMock()
         mock_resp.points = []
         mock_client.query_points.return_value = mock_resp
@@ -1863,7 +1964,6 @@ class TestHybridSearch:
         from qql.ast_nodes import CompareExpr
         from qdrant_client.models import Filter
 
-        mock_client.collection_exists.return_value = True
         mock_resp = mocker.MagicMock()
         mock_resp.points = []
         mock_client.query_points.return_value = mock_resp
@@ -1888,7 +1988,6 @@ class TestHybridSearch:
             executor.execute(node)
 
     def test_non_hybrid_search_unchanged(self, executor, mock_client, mocker):
-        mock_client.collection_exists.return_value = True
         mock_resp = mocker.MagicMock()
         mock_resp.points = []
         mock_client.query_points.return_value = mock_resp
@@ -1903,7 +2002,6 @@ class TestHybridSearch:
     def test_hybrid_search_uses_custom_sparse_model(
         self, executor, mock_client, mocker
     ):
-        mock_client.collection_exists.return_value = True
         mock_resp = mocker.MagicMock()
         mock_resp.points = []
         mock_client.query_points.return_value = mock_resp
@@ -1920,17 +2018,17 @@ class TestHybridSearch:
         sparse_cls.assert_called_once_with("prithivida/Splade_PP_en_v1")
 
 
-class TestEnsureCollectionHybridCompat:
-    def test_named_vector_collection_skips_validation(self, executor, mock_client):
+class TestEnsureCollectionValidation:
+    def test_named_vector_collection_validates_selected_vector(self, executor, mock_client):
         from qdrant_client.models import VectorParams
 
         mock_client.collection_exists.return_value = True
-        # Simulate a named-vector (hybrid) collection: vectors is a dict
         mock_client.get_collection.return_value.config.params.vectors = {
             "dense": VectorParams(size=384, distance="Cosine")
         }
-        # Should not raise even with a different size argument
-        executor._ensure_collection("hybrid_col", 384)
+        mock_client.get_collection.return_value.config.params.sparse_vectors = None
+        topology = executor._resolve_topology("hybrid_col")
+        executor._ensure_collection("hybrid_col", 384, topology, None)
         mock_client.create_collection.assert_not_called()
 
     def test_unnamed_vector_mismatch_still_raises(self, executor, mock_client):
@@ -1940,8 +2038,10 @@ class TestEnsureCollectionHybridCompat:
         mock_client.get_collection.return_value.config.params.vectors = VectorParams(
             size=768, distance="Cosine"
         )
+        mock_client.get_collection.return_value.config.params.sparse_vectors = None
+        topology = executor._resolve_topology("col")
         with pytest.raises(QQLRuntimeError, match="dimension mismatch"):
-            executor._ensure_collection("col", 384)
+            executor._ensure_collection("col", 384, topology, None)
 
 
 FAKE_SPARSE = {"indices": [1, 42, 100], "values": [0.22, 0.8, 0.3]}
@@ -2102,7 +2202,7 @@ class TestRerankSearch:
     def test_rerank_hybrid_search_message(
         self, executor, mock_client, mock_cross_encoder, mocker
     ):
-        mock_client.collection_exists.return_value = True
+        _mock_hybrid_collection(mock_client)
         mock_resp = mocker.MagicMock()
         mock_resp.points = []
         mock_client.query_points.return_value = mock_resp
@@ -2122,6 +2222,10 @@ class TestRerankSearch:
 
 
 class TestSparseOnlySearch:
+    @pytest.fixture(autouse=True)
+    def _collection(self, mock_client):
+        _mock_hybrid_collection(mock_client)
+
     @pytest.fixture
     def mock_sparse(self, mocker):
         mock = mocker.MagicMock()
@@ -2132,7 +2236,6 @@ class TestSparseOnlySearch:
     def test_sparse_only_calls_query_embed(
         self, executor, mock_client, mock_sparse, mocker
     ):
-        mock_client.collection_exists.return_value = True
         mock_resp = mocker.MagicMock()
         mock_resp.points = []
         mock_client.query_points.return_value = mock_resp
@@ -2147,7 +2250,6 @@ class TestSparseOnlySearch:
     def test_sparse_only_queries_sparse_vector_name(
         self, executor, mock_client, mock_sparse, mocker
     ):
-        mock_client.collection_exists.return_value = True
         mock_resp = mocker.MagicMock()
         mock_resp.points = []
         mock_client.query_points.return_value = mock_resp
@@ -2163,7 +2265,6 @@ class TestSparseOnlySearch:
     def test_sparse_only_message_contains_sparse(
         self, executor, mock_client, mock_sparse, mocker
     ):
-        mock_client.collection_exists.return_value = True
         mock_resp = mocker.MagicMock()
         mock_resp.points = []
         mock_client.query_points.return_value = mock_resp
@@ -2178,7 +2279,6 @@ class TestSparseOnlySearch:
     def test_sparse_only_uses_custom_model(
         self, executor, mock_client, mocker
     ):
-        mock_client.collection_exists.return_value = True
         mock_resp = mocker.MagicMock()
         mock_resp.points = []
         mock_client.query_points.return_value = mock_resp
@@ -2197,7 +2297,6 @@ class TestSparseOnlySearch:
     def test_sparse_only_uses_default_model_when_none(
         self, executor, mock_client, mocker
     ):
-        mock_client.collection_exists.return_value = True
         mock_resp = mocker.MagicMock()
         mock_resp.points = []
         mock_client.query_points.return_value = mock_resp
@@ -2219,7 +2318,6 @@ class TestSparseOnlySearch:
     def test_sparse_only_with_rerank_message(
         self, executor, mock_client, mock_sparse, mocker
     ):
-        mock_client.collection_exists.return_value = True
         mock_resp = mocker.MagicMock()
         mock_resp.points = []
         mock_client.query_points.return_value = mock_resp
@@ -2574,7 +2672,7 @@ class TestSearchGroupBy:
         assert kwargs["group_by"] == "tag"
 
     def test_group_by_hybrid_uses_query_points_groups(self, executor, mock_client, mocker):
-        mock_client.collection_exists.return_value = True
+        _mock_hybrid_collection(mock_client)
         mock_response = mocker.MagicMock()
         mock_response.groups = []
         mock_client.query_points_groups.return_value = mock_response
@@ -2630,8 +2728,12 @@ class TestUpdateVector:
 
     def test_update_vector_passes_correct_point_id(self, executor, mock_client):
         from qql.ast_nodes import UpdateVectorStmt
+        from qdrant_client.models import VectorParams
         mock_client.collection_exists.return_value = True
-        mock_client.get_collection.return_value.config.params.vectors = {}  # non-dict → unnamed
+        mock_client.get_collection.return_value.config.params.vectors = VectorParams(
+            size=2, distance="Cosine"
+        )
+        mock_client.get_collection.return_value.config.params.sparse_vectors = None
         node = UpdateVectorStmt(
             collection="notes", point_id=42, vector=(0.5, 0.6)
         )
@@ -2733,8 +2835,11 @@ class TestUpdatePayload:
 class TestSearchGroupBySparse:
     """Gap 1 & 6 — sparse-only grouped search must use the sparse path."""
 
+    @pytest.fixture(autouse=True)
+    def _collection(self, mock_client):
+        _mock_hybrid_collection(mock_client)
+
     def test_sparse_only_grouped_calls_query_points_groups(self, executor, mock_client, mocker):
-        mock_client.collection_exists.return_value = True
         mock_response = mocker.MagicMock()
         mock_response.groups = []
         mock_client.query_points_groups.return_value = mock_response
@@ -2757,7 +2862,6 @@ class TestSearchGroupBySparse:
         mock_client.query_points.assert_not_called()
 
     def test_sparse_only_grouped_label_in_message(self, executor, mock_client, mocker):
-        mock_client.collection_exists.return_value = True
         mock_response = mocker.MagicMock()
         mock_response.groups = []
         mock_client.query_points_groups.return_value = mock_response
@@ -2780,7 +2884,7 @@ class TestSearchGroupByAdvanced:
 
     def test_grouped_hybrid_fusion_dbsf(self, executor, mock_client, mocker):
         from qdrant_client.models import Fusion
-        mock_client.collection_exists.return_value = True
+        _mock_hybrid_collection(mock_client)
         mock_response = mocker.MagicMock()
         mock_response.groups = []
         mock_client.query_points_groups.return_value = mock_response
@@ -2834,9 +2938,9 @@ class TestUpdateVectorVectorShape:
     def test_update_vector_named_collection_sends_dict(self, executor, mock_client):
         from qql.ast_nodes import UpdateVectorStmt
         mock_client.collection_exists.return_value = True
-        # Named collection: get_collection returns dict vectors
         info = mock_client.get_collection.return_value
-        info.config.params.vectors = {"dense": object(), "sparse": object()}  # dict → named
+        info.config.params.vectors = {"dense": object()}
+        info.config.params.sparse_vectors = {"sparse": object()}
 
         node = UpdateVectorStmt(collection="articles", point_id="id-1", vector=(0.5, 0.6))
         executor.execute(node)
@@ -2904,11 +3008,16 @@ class TestGroupedCustomModelForwarding:
 
     def test_grouped_dense_custom_model_forwarded(self, executor, mock_client, mocker):
         """Dense grouped search with USING MODEL must instantiate Embedder with that model."""
+        from qdrant_client.models import VectorParams
+
         mock_client.collection_exists.return_value = True
         mock_response = mocker.MagicMock()
         mock_response.groups = []
         mock_client.query_points_groups.return_value = mock_response
-        mock_client.get_collection.return_value.config.params.vectors = None  # unnamed
+        mock_client.get_collection.return_value.config.params.vectors = VectorParams(
+            size=384, distance="Cosine"
+        )
+        mock_client.get_collection.return_value.config.params.sparse_vectors = None
 
         embedder_cls = mocker.patch("qql.executor.Embedder")
         embedder_instance = mocker.MagicMock()
@@ -2926,7 +3035,7 @@ class TestGroupedCustomModelForwarding:
 
     def test_grouped_hybrid_custom_dense_model_forwarded(self, executor, mock_client, mocker):
         """Hybrid grouped search must instantiate Embedder with the custom dense model."""
-        mock_client.collection_exists.return_value = True
+        _mock_hybrid_collection(mock_client)
         mock_response = mocker.MagicMock()
         mock_response.groups = []
         mock_client.query_points_groups.return_value = mock_response
@@ -2947,7 +3056,7 @@ class TestGroupedCustomModelForwarding:
 
     def test_grouped_hybrid_custom_sparse_model_forwarded(self, executor, mock_client, mocker):
         """Hybrid grouped search must instantiate SparseEmbedder with the custom sparse model."""
-        mock_client.collection_exists.return_value = True
+        _mock_hybrid_collection(mock_client)
         mock_response = mocker.MagicMock()
         mock_response.groups = []
         mock_client.query_points_groups.return_value = mock_response
@@ -2972,11 +3081,16 @@ class TestGroupedSearchParamsDepth:
 
     def test_grouped_search_hnsw_ef_value_forwarded(self, executor, mock_client, mocker):
         """search_params for dense grouped search must carry the hnsw_ef value."""
+        from qdrant_client.models import VectorParams
+
         mock_client.collection_exists.return_value = True
         mock_response = mocker.MagicMock()
         mock_response.groups = []
         mock_client.query_points_groups.return_value = mock_response
-        mock_client.get_collection.return_value.config.params.vectors = None  # unnamed
+        mock_client.get_collection.return_value.config.params.vectors = VectorParams(
+            size=384, distance="Cosine"
+        )
+        mock_client.get_collection.return_value.config.params.sparse_vectors = None
 
         embedder_cls = mocker.patch("qql.executor.Embedder")
         embedder_cls.return_value.embed.return_value = [0.1] * 384
@@ -2994,11 +3108,16 @@ class TestGroupedSearchParamsDepth:
 
     def test_grouped_search_exact_value_forwarded(self, executor, mock_client, mocker):
         """search_params for dense grouped search must carry exact=True when set."""
+        from qdrant_client.models import VectorParams
+
         mock_client.collection_exists.return_value = True
         mock_response = mocker.MagicMock()
         mock_response.groups = []
         mock_client.query_points_groups.return_value = mock_response
-        mock_client.get_collection.return_value.config.params.vectors = None  # unnamed
+        mock_client.get_collection.return_value.config.params.vectors = VectorParams(
+            size=384, distance="Cosine"
+        )
+        mock_client.get_collection.return_value.config.params.sparse_vectors = None
 
         embedder_cls = mocker.patch("qql.executor.Embedder")
         embedder_cls.return_value.embed.return_value = [0.1] * 384
@@ -3016,7 +3135,7 @@ class TestGroupedSearchParamsDepth:
 
     def test_grouped_hybrid_prefetch_params_forwarded(self, executor, mock_client, mocker):
         """Hybrid grouped search must forward search_params into each Prefetch.params."""
-        mock_client.collection_exists.return_value = True
+        _mock_hybrid_collection(mock_client)
         mock_response = mocker.MagicMock()
         mock_response.groups = []
         mock_client.query_points_groups.return_value = mock_response
@@ -3066,7 +3185,7 @@ class TestBuildHybridVectorsHelper:
         """The flat hybrid path must call _build_hybrid_vectors (not inline Embedder calls)."""
         from qdrant_client.models import SparseVector
 
-        mock_client.collection_exists.return_value = True
+        _mock_hybrid_collection(mock_client)
         mock_response = mocker.MagicMock()
         mock_response.points = []
         mock_client.query_points.return_value = mock_response
@@ -3088,7 +3207,7 @@ class TestBuildHybridVectorsHelper:
         """The grouped hybrid path must call _build_hybrid_vectors (not inline Embedder calls)."""
         from qdrant_client.models import SparseVector
 
-        mock_client.collection_exists.return_value = True
+        _mock_hybrid_collection(mock_client)
         mock_response = mocker.MagicMock()
         mock_response.groups = []
         mock_client.query_points_groups.return_value = mock_response

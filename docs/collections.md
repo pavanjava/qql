@@ -91,8 +91,9 @@ Explicitly creates a new empty collection. Collections are also created automati
 CREATE COLLECTION <collection_name>
 CREATE COLLECTION <collection_name> HYBRID
 CREATE COLLECTION <collection_name> USING MODEL '<model_name>'
+CREATE COLLECTION <collection_name> USING VECTOR '<dense_vector_name>'
 CREATE COLLECTION <collection_name> USING HYBRID
-CREATE COLLECTION <collection_name> USING HYBRID DENSE MODEL '<model>'
+CREATE COLLECTION <collection_name> USING HYBRID [DENSE MODEL '<model>'] [DENSE VECTOR '<name>'] [SPARSE VECTOR '<name>']
 CREATE COLLECTION <collection_name> WITH VECTORS { on_disk: <bool> }
 CREATE COLLECTION <collection_name> WITH HNSW { m, ef_construct, full_scan_threshold, max_indexing_threads, on_disk, payload_m, inline_storage }
 CREATE COLLECTION <collection_name> WITH OPTIMIZERS { deleted_threshold, vacuum_min_vector_number, default_segment_number, max_segment_size, memmap_threshold, indexing_threshold, flush_interval_sec, max_optimization_threads, prevent_unoptimized }
@@ -117,6 +118,11 @@ Dense-only collection (standard, uses default model dimensions):
 CREATE COLLECTION research_papers
 ```
 
+QQL-created dense collections use the configured dense vector name (`dense` by default). You can choose a different name explicitly:
+```sql
+CREATE COLLECTION research_papers USING VECTOR 'body'
+```
+
 Dense-only collection pinned to a specific model (768-dimensional):
 ```sql
 CREATE COLLECTION research_papers USING MODEL 'BAAI/bge-base-en-v1.5'
@@ -125,6 +131,11 @@ CREATE COLLECTION research_papers USING MODEL 'BAAI/bge-base-en-v1.5'
 Hybrid collection (dense + sparse BM25, default models):
 ```sql
 CREATE COLLECTION research_papers HYBRID
+```
+
+Hybrid collection with explicit vector names:
+```sql
+CREATE COLLECTION research_papers USING HYBRID DENSE VECTOR 'emb' SPARSE VECTOR 'lex'
 ```
 
 Hybrid collection with a custom dense model:
@@ -380,6 +391,7 @@ Replaces the stored dense vector for a **single point** identified by its ID. Th
 ```
 UPDATE <collection> SET VECTOR WHERE id = '<point_id>' [<vector>]
 UPDATE <collection> SET VECTOR WHERE id = <integer_id>  [<vector>]
+UPDATE <collection> SET VECTOR '<dense_vector_name>' WHERE id = '<point_id>' [<vector>]
 ```
 
 The vector is provided as a JSON-style float array `[v1, v2, ..., vN]`. The array length must match the collection's configured vector dimensions.
@@ -392,13 +404,17 @@ UPDATE articles SET VECTOR WHERE id = '3f2e1a4b-8c91-4d0e-b123-abc123def456' [0.
 
 -- Replace vector by integer ID
 UPDATE articles SET VECTOR WHERE id = 42 [0.1, 0.2, 0.3, 0.4]
+
+-- Replace a specific named vector
+UPDATE articles SET VECTOR 'body' WHERE id = '3f2e1a4b-8c91-4d0e-b123-abc123def456' [0.1, 0.2, 0.3, 0.4]
 ```
 
 **Notes:**
 - Only single-point updates are supported (by ID). Bulk or filter-based vector updates are not supported.
 - The point must already exist; this operation does not create new points.
 - The collection must exist; updating from a non-existent collection raises an error.
-- For hybrid collections, the dense vector named `"dense"` is updated. Sparse vectors are managed separately.
+- For named-vector collections, QQL updates the only dense vector when the target is unambiguous. Use `SET VECTOR '<name>'` when a collection has multiple dense vectors.
+- Sparse vectors are managed separately.
 
 ---
 

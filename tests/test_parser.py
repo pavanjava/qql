@@ -779,6 +779,11 @@ class TestHybridInsert:
         assert node.model == "my-model"
         assert node.sparse_model is None
 
+    def test_insert_using_vector_sets_dense_vector_name(self):
+        node = parse("INSERT INTO COLLECTION col VALUES {'text': 'hi'} USING VECTOR 'emb'")
+        assert node.hybrid is False
+        assert node.dense_vector == "emb"
+
     def test_insert_hybrid_dense_model(self):
         node = parse(
             "INSERT INTO COLLECTION col VALUES {'text': 'hi'} "
@@ -815,6 +820,15 @@ class TestHybridInsert:
         assert node.model == "BAAI/bge-base-en-v1.5"
         assert node.sparse_model == "Qdrant/bm25"
 
+    def test_insert_hybrid_vector_names(self):
+        node = parse(
+            "INSERT INTO COLLECTION col VALUES {'text': 'hi'} "
+            "USING HYBRID DENSE VECTOR 'emb' SPARSE VECTOR 'lex'"
+        )
+        assert node.hybrid is True
+        assert node.dense_vector == "emb"
+        assert node.sparse_vector == "lex"
+
 
 class TestHybridSearch:
     def test_search_using_hybrid_sets_flag(self):
@@ -834,6 +848,11 @@ class TestHybridSearch:
         assert node.hybrid is False
         assert node.model == "my-model"
         assert node.sparse_model is None
+
+    def test_search_using_vector_sets_dense_vector_name(self):
+        node = parse("SEARCH articles SIMILAR TO 'ml' LIMIT 5 USING VECTOR 'emb'")
+        assert node.hybrid is False
+        assert node.dense_vector == "emb"
 
     def test_search_hybrid_dense_model(self):
         node = parse(
@@ -870,6 +889,20 @@ class TestHybridSearch:
         assert node.hybrid is True
         assert node.model == "BAAI/bge-base-en-v1.5"
         assert node.sparse_model == "Qdrant/bm25"
+
+    def test_search_hybrid_vector_names(self):
+        node = parse(
+            "SEARCH articles SIMILAR TO 'ml' LIMIT 10 "
+            "USING HYBRID DENSE VECTOR 'emb' SPARSE VECTOR 'lex'"
+        )
+        assert node.hybrid is True
+        assert node.dense_vector == "emb"
+        assert node.sparse_vector == "lex"
+
+    def test_search_sparse_vector_name(self):
+        node = parse("SEARCH articles SIMILAR TO 'ml' LIMIT 10 USING SPARSE VECTOR 'lex'")
+        assert node.sparse_only is True
+        assert node.sparse_vector == "lex"
 
     def test_search_hybrid_with_where(self):
         node = parse(
@@ -1336,6 +1369,20 @@ class TestTurboQuantCreate:
         assert node.quantization.type == QuantizationType.TURBO
         assert node.quantization.turbo_bits == 1.5
 
+    def test_create_using_vector_sets_dense_vector_name(self):
+        node = parse("CREATE COLLECTION articles USING VECTOR 'emb'")
+        assert node.dense_vector == "emb"
+        assert node.hybrid is False
+
+    def test_create_hybrid_vector_names(self):
+        node = parse(
+            "CREATE COLLECTION articles USING HYBRID "
+            "DENSE VECTOR 'emb' SPARSE VECTOR 'lex'"
+        )
+        assert node.hybrid is True
+        assert node.dense_vector == "emb"
+        assert node.sparse_vector == "lex"
+
     def test_turbo_with_hybrid_dense_model(self):
         node = parse("CREATE COLLECTION articles USING HYBRID DENSE MODEL 'x' QUANTIZE TURBO BITS 1 ALWAYS RAM")
         assert node.hybrid is True
@@ -1427,6 +1474,13 @@ class TestUpdateVector:
         assert node.collection == "articles"
         assert node.point_id == "abc-123"
         assert node.vector == (0.1, 0.2, 0.3)
+
+    def test_update_vector_with_vector_name(self):
+        from qql.ast_nodes import UpdateVectorStmt
+        node = parse("UPDATE articles SET VECTOR 'emb' WHERE id = 'abc-123' [0.1, 0.2]")
+        assert isinstance(node, UpdateVectorStmt)
+        assert node.vector_name == "emb"
+        assert node.vector == (0.1, 0.2)
 
     def test_update_vector_by_integer_id(self):
         from qql.ast_nodes import UpdateVectorStmt

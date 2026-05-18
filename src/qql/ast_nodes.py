@@ -207,6 +207,8 @@ class InsertStmt:
     model: str | None       # dense model; None → use config default
     hybrid: bool = False            # if True, also embed + store sparse BM25 vector
     sparse_model: str | None = None # sparse model; None → SparseEmbedder.DEFAULT_MODEL
+    dense_vector: str | None = None
+    sparse_vector: str | None = None
 
 
 @dataclass(frozen=True)
@@ -216,6 +218,8 @@ class InsertBulkStmt:
     model: str | None                         # dense model; None → use config default
     hybrid: bool = False
     sparse_model: str | None = None
+    dense_vector: str | None = None
+    sparse_vector: str | None = None
 
 
 @dataclass(frozen=True)
@@ -225,6 +229,8 @@ class CreateCollectionStmt:
     model: str | None = None                  # dense model; None → use config default
     quantization: QuantizationConfig | None = None  # optional QUANTIZE clause
     config: CollectionConfig | None = None
+    dense_vector: str | None = None
+    sparse_vector: str | None = None
 
 
 @dataclass(frozen=True)
@@ -287,6 +293,8 @@ class SearchStmt:
     with_clause: SearchWith | None = None
     group_by: str | None = None             # GROUP BY field name; None → normal flat search
     group_size: int = 3                     # max points per group (ignored when group_by is None)
+    dense_vector: str | None = None
+    sparse_vector: str | None = None
 
 
 @dataclass(frozen=True)
@@ -317,6 +325,7 @@ class UpdateVectorStmt:
     collection: str
     point_id: str | int
     vector: tuple[float, ...]   # dense vector as immutable tuple (frozen=True compatible)
+    vector_name: str | None = None
 
 
 @dataclass(frozen=True)

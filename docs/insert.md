@@ -16,8 +16,9 @@ If you include an `id` field in `VALUES`, QQL uses it as the Qdrant point ID. Su
 ```
 INSERT INTO COLLECTION <collection_name> VALUES {<dict>}
 INSERT INTO COLLECTION <collection_name> VALUES {<dict>} USING MODEL '<model_name>'
+INSERT INTO COLLECTION <collection_name> VALUES {<dict>} USING VECTOR '<dense_vector_name>'
 INSERT INTO COLLECTION <collection_name> VALUES {<dict>} USING HYBRID
-INSERT INTO COLLECTION <collection_name> VALUES {<dict>} USING HYBRID DENSE MODEL '<model>' SPARSE MODEL '<model>'
+INSERT INTO COLLECTION <collection_name> VALUES {<dict>} USING HYBRID [DENSE MODEL '<model>'] [DENSE VECTOR '<name>'] [SPARSE MODEL '<model>'] [SPARSE VECTOR '<name>']
 ```
 
 **Examples:**
@@ -49,6 +50,17 @@ Insert into a hybrid collection (dense + sparse BM25 vectors):
 INSERT INTO COLLECTION articles VALUES {'text': 'Attention is all you need'} USING HYBRID
 ```
 
+Insert into a specific named dense vector:
+```sql
+INSERT INTO COLLECTION articles VALUES {'text': 'hello world'} USING VECTOR 'body'
+```
+
+Insert into a hybrid collection with external vector names:
+```sql
+INSERT INTO COLLECTION articles VALUES {'text': 'hello world'}
+  USING HYBRID DENSE VECTOR 'emb' SPARSE VECTOR 'lex'
+```
+
 Insert with custom models for both dense and sparse:
 ```sql
 INSERT INTO COLLECTION articles VALUES {'text': 'hello world'}
@@ -67,6 +79,7 @@ INSERT INTO COLLECTION articles VALUES {'text': 'hello world'}
 - `id`, when provided, must be an unsigned integer or UUID string.
 - If the collection already exists with a different vector size (from a different model), an error is raised with a clear message.
 - Hybrid inserts require a hybrid collection (created with `CREATE COLLECTION ... HYBRID`, auto-created on the first `USING HYBRID` insert, or **auto-detected** — if you omit `USING HYBRID` but the target collection is already a hybrid collection, QQL detects this and uses the hybrid insert path automatically).
+- If a collection has multiple dense or sparse vectors, specify the target vector names explicitly.
 
 ---
 
@@ -82,8 +95,9 @@ Each record may optionally include an `id` field. This is the preferred way to k
 ```
 INSERT BULK INTO COLLECTION <collection_name> VALUES [<dict>, <dict>, ...]
 INSERT BULK INTO COLLECTION <collection_name> VALUES [<dict>, ...] USING MODEL '<model_name>'
+INSERT BULK INTO COLLECTION <collection_name> VALUES [<dict>, ...] USING VECTOR '<dense_vector_name>'
 INSERT BULK INTO COLLECTION <collection_name> VALUES [<dict>, ...] USING HYBRID
-INSERT BULK INTO COLLECTION <collection_name> VALUES [<dict>, ...] USING HYBRID DENSE MODEL '<model>' SPARSE MODEL '<model>'
+INSERT BULK INTO COLLECTION <collection_name> VALUES [<dict>, ...] USING HYBRID [DENSE MODEL '<model>'] [DENSE VECTOR '<name>'] [SPARSE MODEL '<model>'] [SPARSE VECTOR '<name>']
 ```
 
 **Examples:**

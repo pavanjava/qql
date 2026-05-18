@@ -128,6 +128,70 @@ class ExecutionResult:
     data: Any = None
 
 
+@dataclass(frozen=True)
+class CollectionTopology:
+    exists: bool
+    is_named_dense: bool
+    has_unnamed_dense: bool = False
+    dense_names: tuple[str, ...] = ()
+    sparse_names: tuple[str, ...] = ()
+
+    @property
+    def has_dense(self) -> bool:
+        return self.has_unnamed_dense or bool(self.dense_names)
+
+    @property
+    def has_sparse(self) -> bool:
+        return bool(self.sparse_names)
+
+    @property
+    def is_hybrid(self) -> bool:
+        return self.has_dense and self.has_sparse
+
+    def dense_using(self, explicit: str | None = None) -> str | None:
+        if explicit is not None:
+            if self.exists and self.has_unnamed_dense:
+                raise QQLRuntimeError(
+                    "Collection uses an unnamed dense vector; omit USING VECTOR"
+                )
+            if self.exists and explicit not in self.dense_names:
+                raise QQLRuntimeError(
+                    f"Collection has no dense vector named '{explicit}'"
+                )
+            return explicit
+        if self.has_unnamed_dense:
+            return None
+        if len(self.dense_names) == 1:
+            return self.dense_names[0]
+        if not self.dense_names:
+            raise QQLRuntimeError("Collection has no dense vector")
+        raise QQLRuntimeError(
+            "Collection has multiple dense vectors; specify one with USING VECTOR '<name>'"
+        )
+
+    def dense_payload_name(self, explicit: str | None = None) -> str | None:
+        return self.dense_using(explicit)
+
+    def dense_config_key(self, explicit: str | None = None) -> str:
+        name = self.dense_using(explicit)
+        return "" if name is None else name
+
+    def sparse_using(self, explicit: str | None = None) -> str:
+        if explicit is not None:
+            if self.exists and explicit not in self.sparse_names:
+                raise QQLRuntimeError(
+                    f"Collection has no sparse vector named '{explicit}'"
+                )
+            return explicit
+        if len(self.sparse_names) == 1:
+            return self.sparse_names[0]
+        if not self.sparse_names:
+            raise QQLRuntimeError("Collection has no sparse vector")
+        raise QQLRuntimeError(
+            "Collection has multiple sparse vectors; specify one with USING SPARSE VECTOR '<name>'"
+        )
+
+
 class Executor:
     def __init__(self, client: QdrantClient, config: QQLConfig) -> None:
         self._client = client
@@ -168,13 +232,51 @@ class Executor:
 
     # ── Statement executors ───────────────────────────────────────────────
 
+    def _resolve_topology(self, name: str) -> CollectionTopology:
+        if not self._client.collection_exists(name):
+            return CollectionTopology(exists=False, is_named_dense=False)
+
+        info = self._client.get_collection(name)
+        params = info.config.params
+        vectors = params.vectors  # type: ignore[union-attr]
+        sparse_vectors = params.sparse_vectors or {}
+
+        if isinstance(vectors, dict):
+            dense_names = tuple(vectors.keys())
+            has_unnamed_dense = False
+            is_named_dense = True
+        elif vectors is None:
+            dense_names = ()
+            has_unnamed_dense = False
+            is_named_dense = False
+        else:
+            dense_names = ()
+            has_unnamed_dense = True
+            is_named_dense = False
+
+        sparse_names = (
+            tuple(sparse_vectors.keys()) if isinstance(sparse_vectors, dict) else ()
+        )
+        return CollectionTopology(
+            exists=True,
+            is_named_dense=is_named_dense,
+            has_unnamed_dense=has_unnamed_dense,
+            dense_names=dense_names,
+            sparse_names=sparse_names,
+        )
+
+    def _default_dense_vector_name(self) -> str:
+        return self._config.default_dense_vector_name
+
+    def _default_sparse_vector_name(self) -> str:
+        return self._config.default_sparse_vector_name
+
     def _execute_insert(self, node: InsertStmt) -> ExecutionResult:
         if "text" not in node.values:
             raise QQLRuntimeError("INSERT requires a 'text' field in VALUES")
 
-        # Auto-detect hybrid when the user omitted USING HYBRID but the
-        # collection already exists as a hybrid (named-vector) collection.
-        use_hybrid = node.hybrid or self._collection_is_hybrid(node.collection)
+        topology = self._resolve_topology(node.collection)
+        use_hybrid = node.hybrid or (topology.exists and topology.is_hybrid)
 
         # ── Hybrid INSERT: dense + sparse vectors ──────────────────────────
         if use_hybrid:
@@ -190,17 +292,22 @@ class Executor:
                 values=sparse_obj["values"],
             )
 
-            # Auto-create hybrid collection if it doesn't exist yet
-            if not self._client.collection_exists(node.collection):
+            dense_name = node.dense_vector or self._default_dense_vector_name()
+            sparse_name = node.sparse_vector or self._default_sparse_vector_name()
+
+            if topology.exists:
+                dense_name = topology.dense_using(node.dense_vector) or dense_name
+                sparse_name = topology.sparse_using(node.sparse_vector)
+            else:
                 self._create_collection_and_wait(
                     collection_name=node.collection,
                     vectors_config={
-                        "dense": VectorParams(
+                        dense_name: VectorParams(
                             size=len(dense_vector), distance=Distance.COSINE
                         )
                     },
                     sparse_vectors_config={
-                        "sparse": SparseVectorParams(modifier=Modifier.IDF)
+                        sparse_name: SparseVectorParams(modifier=Modifier.IDF)
                     },
                 )
 
@@ -212,7 +319,7 @@ class Executor:
                     points=[
                         PointStruct(
                             id=point_id,
-                            vector={"dense": dense_vector, "sparse": sparse_vector},
+                            vector={dense_name: dense_vector, sparse_name: sparse_vector},
                             payload=payload,
                         )
                     ],
@@ -231,8 +338,10 @@ class Executor:
         embedder = Embedder(model_name)
         vector = embedder.embed(node.values["text"])
 
-        self._ensure_collection(node.collection, len(vector))
-        point_vector = self._build_dense_point_vector(node.collection, vector)
+        self._ensure_collection(
+            node.collection, len(vector), topology, node.dense_vector
+        )
+        point_vector = self._build_dense_point_vector(topology, vector, node.dense_vector)
 
         point_id, payload = self._extract_point_id_and_payload(node.values)
 
@@ -260,9 +369,8 @@ class Executor:
                     f"INSERT BULK: item at index {i} is missing required 'text' field"
                 )
 
-        # Auto-detect hybrid when the user omitted USING HYBRID but the
-        # collection already exists as a hybrid (named-vector) collection.
-        use_hybrid = node.hybrid or self._collection_is_hybrid(node.collection)
+        topology = self._resolve_topology(node.collection)
+        use_hybrid = node.hybrid or (topology.exists and topology.is_hybrid)
 
         # ── Hybrid bulk INSERT: dense + sparse vectors ─────────────────────
         if use_hybrid:
@@ -270,6 +378,11 @@ class Executor:
             sparse_model_name = node.sparse_model or SparseEmbedder.DEFAULT_MODEL
             dense_embedder = Embedder(dense_model)
             sparse_embedder = SparseEmbedder(sparse_model_name)
+            dense_name = node.dense_vector or self._default_dense_vector_name()
+            sparse_name = node.sparse_vector or self._default_sparse_vector_name()
+            if topology.exists:
+                dense_name = topology.dense_using(node.dense_vector) or dense_name
+                sparse_name = topology.sparse_using(node.sparse_vector)
 
             points: list[PointStruct] = []
             for vals in node.values_list:
@@ -282,20 +395,20 @@ class Executor:
                 points.append(
                     PointStruct(
                         id=point_id,
-                        vector={"dense": dense_vector, "sparse": sparse_vector},
+                        vector={dense_name: dense_vector, sparse_name: sparse_vector},
                         payload=payload,
                     )
                 )
 
-            if not self._client.collection_exists(node.collection):
+            if not topology.exists:
                 first_dense = dense_embedder.embed(node.values_list[0]["text"])
                 self._create_collection_and_wait(
                     collection_name=node.collection,
                     vectors_config={
-                        "dense": VectorParams(size=len(first_dense), distance=Distance.COSINE)
+                        dense_name: VectorParams(size=len(first_dense), distance=Distance.COSINE)
                     },
                     sparse_vectors_config={
-                        "sparse": SparseVectorParams(modifier=Modifier.IDF)
+                        sparse_name: SparseVectorParams(modifier=Modifier.IDF)
                     },
                 )
 
@@ -321,12 +434,16 @@ class Executor:
         for vals in node.values_list:
             vector = embedder.embed(vals["text"])
             point_id, payload = self._extract_point_id_and_payload(vals)
-            point_vector = self._build_dense_point_vector(node.collection, vector)
+            point_vector = self._build_dense_point_vector(
+                topology, vector, node.dense_vector
+            )
             points.append(
                 PointStruct(id=point_id, vector=point_vector, payload=payload)
             )
 
-        self._ensure_collection(node.collection, len(vector))
+        self._ensure_collection(
+            node.collection, len(vector), topology, node.dense_vector
+        )
 
         try:
             self._client.upsert(
@@ -376,17 +493,19 @@ class Executor:
         if node.hybrid:
             embedder = Embedder(dense_model_name)
             dims = embedder.dimensions
+            dense_name = node.dense_vector or self._default_dense_vector_name()
+            sparse_name = node.sparse_vector or self._default_sparse_vector_name()
             create_kwargs: dict[str, Any] = {
                 "collection_name": node.collection,
                 "vectors_config": {
-                    "dense": VectorParams(
+                    dense_name: VectorParams(
                         size=dims,
                         distance=Distance.COSINE,
                         on_disk=vector_on_disk,
                     )
                 },
                 "sparse_vectors_config": {
-                    "sparse": SparseVectorParams(modifier=Modifier.IDF)
+                    sparse_name: SparseVectorParams(modifier=Modifier.IDF)
                 },
             }
             if quant_config is not None:
@@ -408,13 +527,16 @@ class Executor:
         # ── Standard dense-only collection ─────────────────────────────────
         embedder = Embedder(dense_model_name)
         dims = embedder.dimensions
+        dense_name = node.dense_vector or self._default_dense_vector_name()
         create_kwargs = {
             "collection_name": node.collection,
-            "vectors_config": VectorParams(
-                size=dims,
-                distance=Distance.COSINE,
-                on_disk=vector_on_disk,
-            ),
+            "vectors_config": {
+                dense_name: VectorParams(
+                    size=dims,
+                    distance=Distance.COSINE,
+                    on_disk=vector_on_disk,
+                )
+            },
         }
         if quant_config is not None:
             create_kwargs["quantization_config"] = quant_config
@@ -432,6 +554,7 @@ class Executor:
     def _execute_alter_collection(self, node: AlterCollectionStmt) -> ExecutionResult:
         if not self._client.collection_exists(node.collection):
             raise QQLRuntimeError(f"Collection '{node.collection}' does not exist")
+        topology = self._resolve_topology(node.collection)
 
         update_kwargs: dict[str, Any] = {"collection_name": node.collection}
         vectors_config = self._build_vectors_config_diff(node.collection, node.config)
@@ -694,6 +817,7 @@ class Executor:
     def _execute_search(self, node: SearchStmt) -> ExecutionResult:
         if not self._client.collection_exists(node.collection):
             raise QQLRuntimeError(f"Collection '{node.collection}' does not exist")
+        topology = self._resolve_topology(node.collection)
 
         # Build WHERE filter (shared by both hybrid and dense-only paths)
         qdrant_filter: Filter | None = None
@@ -711,7 +835,9 @@ class Executor:
 
         # ── GROUP BY SEARCH: delegate to query_points_groups() ─────────────
         if node.group_by is not None:
-            return self._execute_search_groups(node, qdrant_filter, search_params)
+            return self._execute_search_groups(
+                node, qdrant_filter, search_params, topology
+            )
 
         # ── Hybrid SEARCH: prefetch dense+sparse, fuse with the requested strategy ──
         if node.hybrid:
@@ -727,13 +853,13 @@ class Executor:
                     prefetch=[
                         Prefetch(
                             query=dense_vector,
-                            using="dense",
+                            using=topology.dense_using(node.dense_vector),
                             limit=node.limit * _HYBRID_PREFETCH_MULTIPLIER,
                             params=search_params,
                         ),
                         Prefetch(
                             query=sparse_vector,
-                            using="sparse",
+                            using=topology.sparse_using(node.sparse_vector),
                             limit=node.limit * _HYBRID_PREFETCH_MULTIPLIER,
                             params=search_params,
                         ),
@@ -764,7 +890,7 @@ class Executor:
                 data=results,
             )
 
-        # ── Sparse-only SEARCH: query the "sparse" named vector directly ─────
+        # ── Sparse-only SEARCH: query the selected sparse vector directly ───
         if node.sparse_only:
             sparse_model_name = node.sparse_model or SparseEmbedder.DEFAULT_MODEL
             sparse_embedder = SparseEmbedder(sparse_model_name)
@@ -778,7 +904,7 @@ class Executor:
                 response = self._client.query_points(
                     collection_name=node.collection,
                     query=sparse_vector,
-                    using="sparse",
+                    using=topology.sparse_using(node.sparse_vector),
                     limit=fetch_limit,
                     query_filter=qdrant_filter,
                     search_params=search_params,
@@ -811,7 +937,7 @@ class Executor:
         vector = embedder.embed(node.query_text)
 
         try:
-            query_using = self._get_dense_vector_name(node.collection)
+            query_using = topology.dense_using(node.dense_vector)
             response = self._client.query_points(
                 collection_name=node.collection,
                 query=self._build_dense_query(vector, node.with_clause),
@@ -1207,9 +1333,8 @@ class Executor:
     ) -> dict[str, VectorParamsDiff] | None:
         if config is None or config.vectors is None:
             return None
-        vector_name = self._get_dense_vector_name(collection_name)
-        if vector_name is None:
-            vector_name = ""
+        topology = self._resolve_topology(collection_name)
+        vector_name = topology.dense_config_key()
         return {
             vector_name: VectorParamsDiff(on_disk=config.vectors.on_disk),
         }
@@ -1382,26 +1507,15 @@ class Executor:
             "INSERT id must be an unsigned integer or UUID string when provided"
         )
 
-    def _get_dense_vector_name(self, collection_name: str) -> str | None:
-        """Return the dense vector name for named-vector collections.
-
-        Dense-only QQL searches should keep working against hybrid collections,
-        which store vectors under the explicit ``dense`` name.
-        """
-        info = self._client.get_collection(collection_name)
-        vectors = info.config.params.vectors  # type: ignore[union-attr]
-        if isinstance(vectors, dict):
-            return "dense"
-        return None
-
     def _build_dense_point_vector(
         self,
-        collection_name: str,
+        topology: CollectionTopology,
         vector: list[float],
+        explicit_vector: str | None,
     ) -> list[float] | dict[str, list[float]]:
-        if not self._client.collection_exists(collection_name):
-            return vector
-        vector_name = self._get_dense_vector_name(collection_name)
+        if not topology.exists:
+            return {explicit_vector or self._default_dense_vector_name(): vector}
+        vector_name = topology.dense_payload_name(explicit_vector)
         if vector_name is None:
             return vector
         return {vector_name: vector}
@@ -1463,6 +1577,7 @@ class Executor:
         node: SearchStmt,
         qdrant_filter: Filter | None,
         search_params: SearchParams | None,
+        topology: CollectionTopology,
     ) -> ExecutionResult:
         """Execute SEARCH ... GROUP BY using query_points_groups()."""
         try:
@@ -1478,13 +1593,13 @@ class Executor:
                     prefetch=[
                         Prefetch(
                             query=dense_vector,
-                            using="dense",
+                            using=topology.dense_using(node.dense_vector),
                             limit=node.limit * _HYBRID_PREFETCH_MULTIPLIER,
                             params=search_params,
                         ),
                         Prefetch(
                             query=sparse_vector,
-                            using="sparse",
+                            using=topology.sparse_using(node.sparse_vector),
                             limit=node.limit * _HYBRID_PREFETCH_MULTIPLIER,
                             params=search_params,
                         ),
@@ -1506,16 +1621,17 @@ class Executor:
                     collection_name=node.collection,
                     group_by=node.group_by,
                     query=sparse_vector,
-                    using="sparse",
+                    using=topology.sparse_using(node.sparse_vector),
                     limit=node.limit,
                     group_size=node.group_size,
                     query_filter=qdrant_filter,
+                    search_params=search_params,
                 )
                 label = "sparse, grouped"
             else:
                 model_name = node.model or self._config.default_model
                 vector = Embedder(model_name).embed(node.query_text)
-                query_using = self._get_dense_vector_name(node.collection)
+                query_using = topology.dense_using(node.dense_vector)
                 response = self._client.query_points_groups(
                     collection_name=node.collection,
                     group_by=node.group_by,
@@ -1550,8 +1666,8 @@ class Executor:
         """Execute UPDATE ... SET VECTOR using update_vectors()."""
         if not self._client.collection_exists(node.collection):
             raise QQLRuntimeError(f"Collection '{node.collection}' does not exist")
-        # Named-vector collections (hybrid) use "dense"; unnamed use plain list.
-        vector_name = self._get_dense_vector_name(node.collection)
+        topology = self._resolve_topology(node.collection)
+        vector_name = topology.dense_payload_name(node.vector_name)
         vector_struct: Any = (
             {vector_name: list(node.vector)} if vector_name else list(node.vector)
         )
@@ -1745,28 +1861,35 @@ class Executor:
             )
         raise QQLRuntimeError(f"Unknown quantization type: {qc.type}")
 
-    def _collection_is_hybrid(self, name: str) -> bool:
-        """Return True if *name* exists and uses sparse vectors (hybrid collection)."""
-        if not self._client.collection_exists(name):
-            return False
-        info = self._client.get_collection(name)
-        sparse_vectors = info.config.params.sparse_vectors
-        return isinstance(sparse_vectors, dict) and bool(sparse_vectors)
-
-    def _ensure_collection(self, name: str, vector_size: int) -> None:
+    def _ensure_collection(
+        self,
+        name: str,
+        vector_size: int,
+        topology: CollectionTopology,
+        explicit_vector: str | None,
+    ) -> None:
         """Create the collection if it doesn't exist. Raises on dimension mismatch.
 
-        For named-vector (hybrid) collections the validation is skipped — those
-        collections are managed directly by the hybrid insert/create paths.
+        QQL-created dense collections use the configured dense vector name.
+        Externally created unnamed collections still accept plain dense vectors.
         """
-        if self._client.collection_exists(name):
+        if topology.exists:
             info = self._client.get_collection(name)
             vectors = info.config.params.vectors  # type: ignore[union-attr]
             if isinstance(vectors, dict):
-                # Named-vector (hybrid) collection — skip validation here;
-                # the hybrid insert path manages its own collection creation.
-                pass
-            else:
+                vector_name = topology.dense_using(explicit_vector)
+                if vector_name is None:
+                    raise QQLRuntimeError("Collection has no dense vector")
+                vector_config = vectors[vector_name]
+                expected_size = getattr(vector_config, "size", None)
+                if expected_size is not None and expected_size != vector_size:
+                    raise QQLRuntimeError(
+                        f"Vector dimension mismatch: collection '{name}' vector "
+                        f"'{vector_name}' expects {expected_size} dims, but "
+                        f"model produces {vector_size} dims. Specify a compatible "
+                        "model with USING MODEL '<model>'."
+                    )
+            elif vectors is not None:
                 # Unnamed single-vector collection: validate dimensions
                 if vectors.size != vector_size:
                     raise QQLRuntimeError(
@@ -1774,10 +1897,16 @@ class Executor:
                         f"{vectors.size} dims, but model produces {vector_size} dims. "
                         f"Specify a compatible model with USING MODEL '<model>'."
                     )
+            else:
+                raise QQLRuntimeError("Collection has no dense vector")
         else:
             self._create_collection_and_wait(
                 collection_name=name,
-                vectors_config=VectorParams(size=vector_size, distance=Distance.COSINE),
+                vectors_config={
+                    explicit_vector or self._default_dense_vector_name(): VectorParams(
+                        size=vector_size, distance=Distance.COSINE
+                    )
+                },
             )
 
     def _create_collection_and_wait(self, **kwargs: Any) -> None:

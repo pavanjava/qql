@@ -114,26 +114,45 @@ class Parser:
         model: str | None = None
         hybrid: bool = False
         sparse_model: str | None = None
+        dense_vector: str | None = None
+        sparse_vector: str | None = None
         if self._peek().kind == TokenKind.USING:
             self._advance()  # consume USING
             if self._peek().kind == TokenKind.HYBRID:
                 self._advance()  # consume HYBRID
                 hybrid = True
-                # Optional DENSE MODEL and/or SPARSE MODEL sub-clauses, any order
+                # Optional DENSE/SPARSE MODEL or VECTOR sub-clauses, any order
                 while self._peek().kind in (TokenKind.DENSE, TokenKind.SPARSE):
                     sub = self._advance()
-                    self._expect(TokenKind.MODEL)
-                    m = self._expect(TokenKind.STRING).value
-                    if sub.kind == TokenKind.DENSE:
-                        model = m
+                    if self._peek().kind == TokenKind.MODEL:
+                        self._advance()
+                        m = self._expect(TokenKind.STRING).value
+                        if sub.kind == TokenKind.DENSE:
+                            model = m
+                        else:
+                            sparse_model = m
+                    elif self._peek().kind == TokenKind.VECTOR:
+                        self._advance()
+                        name = self._expect(TokenKind.STRING).value
+                        if sub.kind == TokenKind.DENSE:
+                            dense_vector = name
+                        else:
+                            sparse_vector = name
                     else:
-                        sparse_model = m
+                        raise QQLSyntaxError(
+                            "Expected MODEL or VECTOR after DENSE/SPARSE in USING HYBRID",
+                            self._peek().pos,
+                        )
+            elif self._peek().kind == TokenKind.VECTOR:
+                self._advance()
+                dense_vector = self._expect(TokenKind.STRING).value
             else:
                 self._expect(TokenKind.MODEL)
                 model = self._expect(TokenKind.STRING).value
         return InsertStmt(
             collection=collection, values=values, model=model,
             hybrid=hybrid, sparse_model=sparse_model,
+            dense_vector=dense_vector, sparse_vector=sparse_vector,
         )
 
     def _parse_insert_bulk_body(self) -> InsertBulkStmt:
@@ -153,6 +172,8 @@ class Parser:
         model: str | None = None
         hybrid: bool = False
         sparse_model: str | None = None
+        dense_vector: str | None = None
+        sparse_vector: str | None = None
         if self._peek().kind == TokenKind.USING:
             self._advance()  # consume USING
             if self._peek().kind == TokenKind.HYBRID:
@@ -160,18 +181,35 @@ class Parser:
                 hybrid = True
                 while self._peek().kind in (TokenKind.DENSE, TokenKind.SPARSE):
                     sub = self._advance()
-                    self._expect(TokenKind.MODEL)
-                    m = self._expect(TokenKind.STRING).value
-                    if sub.kind == TokenKind.DENSE:
-                        model = m
+                    if self._peek().kind == TokenKind.MODEL:
+                        self._advance()
+                        m = self._expect(TokenKind.STRING).value
+                        if sub.kind == TokenKind.DENSE:
+                            model = m
+                        else:
+                            sparse_model = m
+                    elif self._peek().kind == TokenKind.VECTOR:
+                        self._advance()
+                        name = self._expect(TokenKind.STRING).value
+                        if sub.kind == TokenKind.DENSE:
+                            dense_vector = name
+                        else:
+                            sparse_vector = name
                     else:
-                        sparse_model = m
+                        raise QQLSyntaxError(
+                            "Expected MODEL or VECTOR after DENSE/SPARSE in USING HYBRID",
+                            self._peek().pos,
+                        )
+            elif self._peek().kind == TokenKind.VECTOR:
+                self._advance()
+                dense_vector = self._expect(TokenKind.STRING).value
             else:
                 self._expect(TokenKind.MODEL)
                 model = self._expect(TokenKind.STRING).value
         return InsertBulkStmt(
             collection=collection, values_list=values_list,
             model=model, hybrid=hybrid, sparse_model=sparse_model,
+            dense_vector=dense_vector, sparse_vector=sparse_vector,
         )
 
     def _parse_create(self) -> CreateCollectionStmt | CreateIndexStmt:
@@ -181,9 +219,10 @@ class Parser:
             collection = self._parse_identifier()
             hybrid: bool = False
             model: str | None = None
+            dense_vector: str | None = None
+            sparse_vector: str | None = None
 
             if self._peek().kind == TokenKind.HYBRID:
-                # Bare HYBRID shorthand — backward compat
                 self._advance()
                 hybrid = True
             elif self._peek().kind == TokenKind.USING:
@@ -191,11 +230,31 @@ class Parser:
                 if self._peek().kind == TokenKind.HYBRID:
                     self._advance()  # consume HYBRID
                     hybrid = True
-                    # Optional DENSE MODEL sub-clause
-                    if self._peek().kind == TokenKind.DENSE:
-                        self._advance()  # consume DENSE
-                        self._expect(TokenKind.MODEL)
-                        model = self._expect(TokenKind.STRING).value
+                    while self._peek().kind in (TokenKind.DENSE, TokenKind.SPARSE):
+                        sub = self._advance()
+                        if self._peek().kind == TokenKind.MODEL:
+                            self._advance()
+                            if sub.kind != TokenKind.DENSE:
+                                raise QQLSyntaxError(
+                                    "CREATE COLLECTION supports MODEL only for DENSE vectors",
+                                    self._peek().pos,
+                                )
+                            model = self._expect(TokenKind.STRING).value
+                        elif self._peek().kind == TokenKind.VECTOR:
+                            self._advance()
+                            name = self._expect(TokenKind.STRING).value
+                            if sub.kind == TokenKind.DENSE:
+                                dense_vector = name
+                            else:
+                                sparse_vector = name
+                        else:
+                            raise QQLSyntaxError(
+                                "Expected MODEL or VECTOR after DENSE/SPARSE in USING HYBRID",
+                                self._peek().pos,
+                            )
+                elif self._peek().kind == TokenKind.VECTOR:
+                    self._advance()
+                    dense_vector = self._expect(TokenKind.STRING).value
                 else:
                     self._expect(TokenKind.MODEL)
                     model = self._expect(TokenKind.STRING).value
@@ -209,6 +268,8 @@ class Parser:
                 model=model,
                 quantization=quantization,
                 config=config,
+                dense_vector=dense_vector,
+                sparse_vector=sparse_vector,
             )
 
         self._expect(TokenKind.INDEX)
@@ -631,12 +692,14 @@ class Parser:
         fusion: str | None = None
         sparse_only: bool = False
         sparse_model: str | None = None
+        dense_vector: str | None = None
+        sparse_vector: str | None = None
         if self._peek().kind == TokenKind.USING:
             self._advance()  # consume USING
             if self._peek().kind == TokenKind.HYBRID:
                 self._advance()  # consume HYBRID
                 hybrid = True
-                # Optional FUSION / DENSE MODEL / SPARSE MODEL sub-clauses, any order.
+                # Optional FUSION / DENSE|SPARSE MODEL|VECTOR sub-clauses, any order.
                 while self._peek().kind in (TokenKind.FUSION, TokenKind.DENSE, TokenKind.SPARSE):
                     sub = self._advance()
                     if sub.kind == TokenKind.FUSION:
@@ -648,18 +711,37 @@ class Parser:
                                 value_tok.pos,
                             )
                         continue
-                    self._expect(TokenKind.MODEL)
-                    m = self._expect(TokenKind.STRING).value
-                    if sub.kind == TokenKind.DENSE:
-                        model = m
+                    if self._peek().kind == TokenKind.MODEL:
+                        self._advance()
+                        m = self._expect(TokenKind.STRING).value
+                        if sub.kind == TokenKind.DENSE:
+                            model = m
+                        else:
+                            sparse_model = m
+                    elif self._peek().kind == TokenKind.VECTOR:
+                        self._advance()
+                        name = self._expect(TokenKind.STRING).value
+                        if sub.kind == TokenKind.DENSE:
+                            dense_vector = name
+                        else:
+                            sparse_vector = name
                     else:
-                        sparse_model = m
+                        raise QQLSyntaxError(
+                            "Expected MODEL or VECTOR after DENSE/SPARSE in USING HYBRID",
+                            self._peek().pos,
+                        )
             elif self._peek().kind == TokenKind.SPARSE:
                 self._advance()  # consume SPARSE
                 sparse_only = True
-                if self._peek().kind == TokenKind.MODEL:
-                    self._advance()  # consume MODEL
-                    sparse_model = self._expect(TokenKind.STRING).value
+                while self._peek().kind in (TokenKind.MODEL, TokenKind.VECTOR):
+                    sub = self._advance()
+                    if sub.kind == TokenKind.MODEL:
+                        sparse_model = self._expect(TokenKind.STRING).value
+                    else:
+                        sparse_vector = self._expect(TokenKind.STRING).value
+            elif self._peek().kind == TokenKind.VECTOR:
+                self._advance()
+                dense_vector = self._expect(TokenKind.STRING).value
             else:
                 self._expect(TokenKind.MODEL)
                 model = self._expect(TokenKind.STRING).value
@@ -743,6 +825,8 @@ class Parser:
             with_clause=with_clause,
             group_by=group_by,
             group_size=group_size,
+            dense_vector=dense_vector,
+            sparse_vector=sparse_vector,
         )
 
     def _parse_recommend(self) -> RecommendStmt:
@@ -844,6 +928,9 @@ class Parser:
 
         if self._peek().kind == TokenKind.VECTOR:
             self._advance()  # consume VECTOR
+            vector_name: str | None = None
+            if self._peek().kind == TokenKind.STRING:
+                vector_name = self._advance().value
             self._expect(TokenKind.WHERE)
             self._expect(TokenKind.ID)
             self._expect(TokenKind.EQUALS)
@@ -872,6 +959,7 @@ class Parser:
                 collection=collection,
                 point_id=point_id,
                 vector=coerced,
+                vector_name=vector_name,
             )
 
         if self._peek().kind == TokenKind.PAYLOAD:

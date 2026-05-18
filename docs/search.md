@@ -12,10 +12,11 @@ An optional `WHERE` clause filters the candidate set **before** similarity ranki
 ```
 SEARCH <collection_name> SIMILAR TO '<query_text>' LIMIT <n>
 SEARCH <collection_name> SIMILAR TO '<query_text>' LIMIT <n> USING MODEL '<model_name>'
+SEARCH <collection_name> SIMILAR TO '<query_text>' LIMIT <n> USING VECTOR '<dense_vector_name>'
 SEARCH <collection_name> SIMILAR TO '<query_text>' LIMIT <n> [USING MODEL '<model>'] WHERE <filter>
 SEARCH <collection_name> SIMILAR TO '<query_text>' LIMIT <n> USING HYBRID
-SEARCH <collection_name> SIMILAR TO '<query_text>' LIMIT <n> USING HYBRID [FUSION 'rrf|dbsf'] [DENSE MODEL '<model>'] [SPARSE MODEL '<model>'] [WHERE <filter>]
-SEARCH <collection_name> SIMILAR TO '<query_text>' LIMIT <n> USING SPARSE [MODEL '<sparse_model>']
+SEARCH <collection_name> SIMILAR TO '<query_text>' LIMIT <n> USING HYBRID [FUSION 'rrf|dbsf'] [DENSE MODEL '<model>'] [DENSE VECTOR '<name>'] [SPARSE MODEL '<model>'] [SPARSE VECTOR '<name>'] [WHERE <filter>]
+SEARCH <collection_name> SIMILAR TO '<query_text>' LIMIT <n> USING SPARSE [MODEL '<sparse_model>'] [VECTOR '<sparse_vector_name>']
 SEARCH <collection_name> SIMILAR TO '<query_text>' LIMIT <n> EXACT
 SEARCH <collection_name> SIMILAR TO '<query_text>' LIMIT <n> [USING ...] [WHERE <filter>] [RERANK] WITH { hnsw_ef: <n>, exact: true|false, acorn: true|false, indexed_only: true|false, quantization: { ignore: true|false, rescore: true|false, oversampling: <n> }, mmr_diversity: <0..1>, mmr_candidates: <n> }
 SEARCH <collection_name> SIMILAR TO '<query_text>' LIMIT <n> [USING ...] [WHERE <filter>] RERANK [MODEL '<reranker_model>']
@@ -38,7 +39,17 @@ Hybrid search (combines dense semantic + sparse BM25 keyword retrieval via RRF b
 SEARCH articles SIMILAR TO 'attention mechanism' LIMIT 10 USING HYBRID
 ```
 
-Sparse-only search (queries only the `sparse` named vector — useful for pure keyword retrieval):
+Search a specific named dense vector:
+```sql
+SEARCH articles SIMILAR TO 'attention mechanism' LIMIT 10 USING VECTOR 'body'
+```
+
+Hybrid search against external vector names:
+```sql
+SEARCH articles SIMILAR TO 'attention mechanism' LIMIT 10 USING HYBRID DENSE VECTOR 'emb' SPARSE VECTOR 'lex'
+```
+
+Sparse-only search (queries a sparse vector — useful for pure keyword retrieval):
 ```sql
 SEARCH medical_knowledge SIMILAR TO 'beta blocker contraindications' LIMIT 5 USING SPARSE
 ```
