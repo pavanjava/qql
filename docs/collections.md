@@ -93,10 +93,22 @@ CREATE COLLECTION <collection_name> HYBRID
 CREATE COLLECTION <collection_name> USING MODEL '<model_name>'
 CREATE COLLECTION <collection_name> USING HYBRID
 CREATE COLLECTION <collection_name> USING HYBRID DENSE MODEL '<model>'
-CREATE COLLECTION <collection_name> HNSW { payload_m: <int> }
+CREATE COLLECTION <collection_name> WITH VECTORS { on_disk: <bool> }
+CREATE COLLECTION <collection_name> WITH HNSW { m, ef_construct, full_scan_threshold, max_indexing_threads, on_disk, payload_m, inline_storage }
+CREATE COLLECTION <collection_name> WITH OPTIMIZERS { deleted_threshold, vacuum_min_vector_number, default_segment_number, max_segment_size, memmap_threshold, indexing_threshold, flush_interval_sec, max_optimization_threads, prevent_unoptimized }
+CREATE COLLECTION <collection_name> WITH PARAMS { replication_factor, write_consistency_factor, on_disk_payload }
+ALTER COLLECTION <collection_name> WITH HNSW { ... }
+ALTER COLLECTION <collection_name> WITH VECTORS { ... }
+ALTER COLLECTION <collection_name> WITH OPTIMIZERS { ... }
+ALTER COLLECTION <collection_name> WITH PARAMS { ... }
+ALTER COLLECTION <collection_name> QUANTIZE SCALAR [QUANTILE <0.0–1.0>] [ALWAYS RAM]
+ALTER COLLECTION <collection_name> QUANTIZE BINARY [ALWAYS RAM]
+ALTER COLLECTION <collection_name> QUANTIZE PRODUCT [ALWAYS RAM]
+ALTER COLLECTION <collection_name> QUANTIZE TURBO [BITS <1|1.5|2|4>] [ALWAYS RAM]
+ALTER COLLECTION <collection_name> QUANTIZE DISABLED
 ```
 
-Any of the above forms can be followed by an optional `QUANTIZE` clause and/or `HNSW { payload_m: <int> }`.
+Any `CREATE COLLECTION` form can be followed by an optional `QUANTIZE` clause and one or more `WITH ... { ... }` config blocks.
 
 **Examples:**
 
@@ -122,21 +134,27 @@ CREATE COLLECTION research_papers USING HYBRID DENSE MODEL 'BAAI/bge-base-en-v1.
 
 Dense collection with payload-aware HNSW links:
 ```sql
-CREATE COLLECTION research_papers HNSW {payload_m: 16}
+CREATE COLLECTION research_papers WITH HNSW { payload_m: 16 }
 ```
 
 When `USING MODEL` is omitted, the collection uses the **default embedding model's dimensions** (384 for `all-MiniLM-L6-v2`). If the collection already exists, the command succeeds with a message and does nothing.
 
-### HNSW clause
+### Collection config blocks
 
-QQL currently supports one explicit HNSW knob during collection creation:
+QQL supports the same config blocks on both `CREATE COLLECTION` and `ALTER COLLECTION`:
 
-- `payload_m` — enables payload-aware HNSW connectivity used by Qdrant for filtered / tenant-aware workloads
+- `WITH VECTORS { on_disk }`
+- `WITH HNSW { m, ef_construct, full_scan_threshold, max_indexing_threads, on_disk, payload_m, inline_storage }`
+- `WITH OPTIMIZERS { deleted_threshold, vacuum_min_vector_number, default_segment_number, max_segment_size, memmap_threshold, indexing_threshold, flush_interval_sec, max_optimization_threads, prevent_unoptimized }`
+- `WITH PARAMS { replication_factor, write_consistency_factor, on_disk_payload }` on create
+- `WITH PARAMS { replication_factor, write_consistency_factor, read_fan_out_factor, read_fan_out_delay_ms, on_disk_payload }` on alter
+- `ALTER COLLECTION ... QUANTIZE ...` supports the same quantization forms as create, plus `QUANTIZE DISABLED`
 
 Example:
 
 ```sql
-CREATE COLLECTION tenant_docs USING HYBRID HNSW {payload_m: 16}
+CREATE COLLECTION tenant_docs USING HYBRID WITH HNSW { payload_m: 16, m: 32 }
+ALTER COLLECTION tenant_docs WITH OPTIMIZERS { indexing_threshold: 10000 }
 ```
 
 ---

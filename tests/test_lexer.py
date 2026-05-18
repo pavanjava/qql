@@ -234,6 +234,26 @@ class TestHybridKeyword:
         ks = kinds("FUSION")
         assert ks[0] == TokenKind.FUSION
 
+    def test_alter_keyword(self):
+        ks = kinds("ALTER")
+        assert ks[0] == TokenKind.ALTER
+
+    def test_vectors_keyword(self):
+        ks = kinds("VECTORS")
+        assert ks[0] == TokenKind.VECTORS
+
+    def test_optimizers_keyword(self):
+        ks = kinds("OPTIMIZERS")
+        assert ks[0] == TokenKind.OPTIMIZERS
+
+    def test_params_keyword(self):
+        ks = kinds("PARAMS")
+        assert ks[0] == TokenKind.PARAMS
+
+    def test_disabled_keyword(self):
+        ks = kinds("DISABLED")
+        assert ks[0] == TokenKind.DISABLED
+
     def test_hybrid_in_create_statement(self):
         ks = kinds("CREATE COLLECTION articles HYBRID")
         assert ks[3] == TokenKind.HYBRID

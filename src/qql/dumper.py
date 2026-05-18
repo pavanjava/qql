@@ -66,11 +66,120 @@ def _serialize_dict(d: dict[str, Any], indent: int = 4) -> str:
 # ── Collection type detection ─────────────────────────────────────────────────
 
 
+def _collection_info(collection: str, client: QdrantClient) -> Any:
+    return client.get_collection(collection)
+
+
 def _is_hybrid(collection: str, client: QdrantClient) -> bool:
-    """Return True if the collection uses named vectors (dense + sparse)."""
-    info = client.get_collection(collection)
-    vectors = info.config.params.vectors  # type: ignore[union-attr]
-    return isinstance(vectors, dict)
+    """Return True only when sparse vectors are configured."""
+    info = _collection_info(collection, client)
+    sparse_vectors = info.config.params.sparse_vectors
+    return isinstance(sparse_vectors, dict) and bool(sparse_vectors)
+
+
+def _quantization_clause(info: Any) -> str:
+    quant = info.config.quantization_config
+    if quant is None:
+        return ""
+    if hasattr(quant, "scalar"):
+        clause = " QUANTIZE SCALAR"
+        if quant.scalar.quantile is not None:
+            clause += f" QUANTILE {quant.scalar.quantile}"
+        if quant.scalar.always_ram:
+            clause += " ALWAYS RAM"
+        return clause
+    if hasattr(quant, "binary"):
+        clause = " QUANTIZE BINARY"
+        if quant.binary.always_ram:
+            clause += " ALWAYS RAM"
+        return clause
+    if hasattr(quant, "product"):
+        clause = " QUANTIZE PRODUCT"
+        if quant.product.always_ram:
+            clause += " ALWAYS RAM"
+        return clause
+    if hasattr(quant, "turbo"):
+        clause = " QUANTIZE TURBO"
+        bits = quant.turbo.bits
+        if bits is not None:
+            bit_map = {
+                "BITS4": "4",
+                "BITS2": "2",
+                "BITS1_5": "1.5",
+                "BITS1": "1",
+            }
+            clause += f" BITS {bit_map.get(getattr(bits, 'name', ''), str(bits))}"
+        if quant.turbo.always_ram:
+            clause += " ALWAYS RAM"
+        return clause
+    return ""
+
+
+def _config_clauses(info: Any) -> str:
+    clauses: list[str] = []
+    params = info.config.params
+    vectors = params.vectors  # type: ignore[union-attr]
+    dense_vectors = vectors.get("dense") if isinstance(vectors, dict) else vectors
+    if dense_vectors is not None and getattr(dense_vectors, "on_disk", None) is not None:
+        clauses.append(f"WITH VECTORS {{ on_disk: {'true' if dense_vectors.on_disk else 'false'} }}")
+
+    hnsw = info.config.hnsw_config
+    hnsw_items: list[str] = []
+    for key in (
+        "m",
+        "ef_construct",
+        "full_scan_threshold",
+        "max_indexing_threads",
+        "payload_m",
+    ):
+        value = getattr(hnsw, key, None)
+        if value is not None:
+            hnsw_items.append(f"{key}: {value}")
+    for key in ("on_disk", "inline_storage"):
+        value = getattr(hnsw, key, None)
+        if value is not None:
+            hnsw_items.append(f"{key}: {'true' if value else 'false'}")
+    if hnsw_items:
+        clauses.append(f"WITH HNSW {{ {', '.join(hnsw_items)} }}")
+
+    optimizers = getattr(info.config, "optimizer_config", None) or getattr(info.config, "optimizers_config", None)
+    optimizer_items: list[str] = []
+    if optimizers is not None:
+        for key in (
+            "deleted_threshold",
+            "vacuum_min_vector_number",
+            "default_segment_number",
+            "max_segment_size",
+            "memmap_threshold",
+            "indexing_threshold",
+            "flush_interval_sec",
+        ):
+            value = getattr(optimizers, key, None)
+            if value is not None:
+                optimizer_items.append(f"{key}: {value}")
+        max_opt_threads = getattr(optimizers, "max_optimization_threads", None)
+        if max_opt_threads is not None:
+            value = getattr(max_opt_threads, "value", max_opt_threads)
+            optimizer_items.append(f"max_optimization_threads: {value}")
+        prevent_unoptimized = getattr(optimizers, "prevent_unoptimized", None)
+        if prevent_unoptimized is not None:
+            optimizer_items.append(
+                f"prevent_unoptimized: {'true' if prevent_unoptimized else 'false'}"
+            )
+    if optimizer_items:
+        clauses.append(f"WITH OPTIMIZERS {{ {', '.join(optimizer_items)} }}")
+
+    param_items: list[str] = []
+    for key in ("replication_factor", "write_consistency_factor", "on_disk_payload"):
+        value = getattr(params, key, None)
+        if value is not None:
+            if isinstance(value, bool):
+                param_items.append(f"{key}: {'true' if value else 'false'}")
+            else:
+                param_items.append(f"{key}: {value}")
+    if param_items:
+        clauses.append(f"WITH PARAMS {{ {', '.join(param_items)} }}")
+    return (" " + " ".join(clauses)) if clauses else ""
 
 
 # ── Main entry point ──────────────────────────────────────────────────────────
@@ -98,7 +207,9 @@ def dump_collection(
         )
         return 0, 0
 
-    hybrid = _is_hybrid(collection, client)
+    info = _collection_info(collection, client)
+    sparse_vectors = info.config.params.sparse_vectors
+    hybrid = isinstance(sparse_vectors, dict) and bool(sparse_vectors)
     col_type = "hybrid (dense + sparse)" if hybrid else "dense"
     using_clause = " USING HYBRID" if hybrid else ""
 
@@ -138,7 +249,11 @@ def dump_collection(
 
         # ── CREATE statement ──────────────────────────────────────────────
         hybrid_suffix = " HYBRID" if hybrid else ""
-        f.write(f"CREATE COLLECTION {collection}{hybrid_suffix}\n\n")
+        config_suffix = _config_clauses(info)
+        quantization_suffix = _quantization_clause(info)
+        f.write(
+            f"CREATE COLLECTION {collection}{hybrid_suffix}{config_suffix}{quantization_suffix}\n\n"
+        )
 
         # ── Paginate and write INSERT BULK batches ────────────────────────
         offset = None

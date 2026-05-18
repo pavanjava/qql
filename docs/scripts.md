@@ -74,7 +74,7 @@ Done. 3/3 statement(s) succeeded.
 
 Export every point in a collection to a `.qql` script file. The generated file is valid QQL that re-creates the collection and re-inserts all payload data. Points are written in batches of 50 as `INSERT BULK` statements.
 
-> **Scope of a dump:** The generated script preserves collection topology (dense vs hybrid) and all point payloads. It does **not** preserve quantization config, pinned model / vector dimensions, or payload indexes — those must be re-applied manually after import if needed.
+> **Scope of a dump:** The generated script preserves collection topology (dense vs hybrid), collection config blocks, quantization config, and all point payloads. It does **not** preserve pinned model / vector dimensions or payload indexes — those must be re-applied manually after import if needed.
 
 **CLI usage:**
 ```bash

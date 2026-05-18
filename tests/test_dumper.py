@@ -1,6 +1,8 @@
 """Tests for the QQL collection dumper (src/qql/dumper.py)."""
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 from rich.console import Console
 
@@ -40,11 +42,28 @@ def _make_client(mocker, *, exists=True, hybrid=False, points=None, total=None):
     # get_collection — return hybrid or dense vector config
     if hybrid:
         client.get_collection.return_value.config.params.vectors = {"dense": object()}
+        client.get_collection.return_value.config.params.sparse_vectors = {"sparse": object()}
     else:
         # non-dict → dense-only
         client.get_collection.return_value.config.params.vectors = mocker.MagicMock(
             spec=[]  # not a dict
         )
+        client.get_collection.return_value.config.params.sparse_vectors = None
+    client.get_collection.return_value.config.params.replication_factor = None
+    client.get_collection.return_value.config.params.write_consistency_factor = None
+    client.get_collection.return_value.config.params.on_disk_payload = None
+    client.get_collection.return_value.config.hnsw_config = SimpleNamespace(
+        m=None,
+        ef_construct=None,
+        full_scan_threshold=None,
+        max_indexing_threads=None,
+        on_disk=None,
+        payload_m=None,
+        inline_storage=None,
+    )
+    client.get_collection.return_value.config.quantization_config = None
+    client.get_collection.return_value.config.optimizer_config = None
+    client.get_collection.return_value.config.optimizers_config = None
 
     # count
     cnt = mocker.MagicMock()
@@ -111,6 +130,7 @@ class TestIsHybrid:
     def test_dict_vectors_is_hybrid(self, mocker):
         client = mocker.MagicMock()
         client.get_collection.return_value.config.params.vectors = {"dense": object()}
+        client.get_collection.return_value.config.params.sparse_vectors = {"sparse": object()}
         assert _is_hybrid("col", client) is True
 
     def test_scalar_vectors_is_not_hybrid(self, mocker):
@@ -118,6 +138,13 @@ class TestIsHybrid:
         client.get_collection.return_value.config.params.vectors = mocker.MagicMock(
             spec=[]
         )
+        client.get_collection.return_value.config.params.sparse_vectors = None
+        assert _is_hybrid("col", client) is False
+
+    def test_named_dense_without_sparse_is_not_hybrid(self, mocker):
+        client = mocker.MagicMock()
+        client.get_collection.return_value.config.params.vectors = {"dense": object()}
+        client.get_collection.return_value.config.params.sparse_vectors = None
         assert _is_hybrid("col", client) is False
 
 
@@ -145,6 +172,41 @@ class TestDumpCollection:
         dump_collection("col", out, client, null_console(), null_console())
         content = (tmp_path / "dump.qql").read_text()
         assert "CREATE COLLECTION col HYBRID" in content
+
+    def test_writes_collection_config_and_quantization(self, tmp_path, mocker):
+        from qdrant_client.models import (
+            ScalarQuantization,
+            ScalarQuantizationConfig,
+            ScalarType,
+            VectorParams,
+            Distance,
+        )
+
+        out = str(tmp_path / "dump.qql")
+        client = _make_client(mocker, points=[{"text": "hello"}])
+        info = client.get_collection.return_value
+        info.config.params.vectors = VectorParams(
+            size=384,
+            distance=Distance.COSINE,
+            on_disk=True,
+        )
+        info.config.params.replication_factor = 2
+        info.config.params.write_consistency_factor = 1
+        info.config.params.on_disk_payload = True
+        info.config.hnsw_config.m = 32
+        info.config.hnsw_config.payload_m = 24
+        info.config.quantization_config = ScalarQuantization(
+            scalar=ScalarQuantizationConfig(
+                type=ScalarType.INT8,
+                always_ram=True,
+            )
+        )
+        dump_collection("col", out, client, null_console(), null_console())
+        content = (tmp_path / "dump.qql").read_text()
+        assert "WITH VECTORS { on_disk: true }" in content
+        assert "WITH HNSW { m: 32, payload_m: 24 }" in content
+        assert "WITH PARAMS { replication_factor: 2, write_consistency_factor: 1, on_disk_payload: true }" in content
+        assert "QUANTIZE SCALAR ALWAYS RAM" in content
 
     def test_hybrid_insert_bulk_has_using_hybrid(self, tmp_path, mocker):
         out = str(tmp_path / "dump.qql")

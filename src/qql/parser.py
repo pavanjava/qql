@@ -2,8 +2,11 @@ from typing import Any
 
 from .ast_nodes import (
     ASTNode,
+    AlterCollectionStmt,
     AndExpr,
     BetweenExpr,
+    CollectionParamsConfig,
+    CollectionConfig,
     CompareExpr,
     CreateCollectionStmt,
     CreateIndexStmt,
@@ -22,7 +25,9 @@ from .ast_nodes import (
     MatchTextExpr,
     NotExpr,
     NotInExpr,
+    OptimizersRuntimeConfig,
     OrExpr,
+    QuantizationUpdate,
     QuantizationConfig,
     QuantizationType,
     QuantizationSearchWith,
@@ -35,6 +40,8 @@ from .ast_nodes import (
     ShowCollectionsStmt,
     UpdateVectorStmt,
     UpdatePayloadStmt,
+    VectorsConfig,
+    HnswRuntimeConfig,
 )
 from .exceptions import QQLSyntaxError
 from .lexer import Token, TokenKind
@@ -65,6 +72,8 @@ class Parser:
             node = self._parse_insert()
         elif tok.kind == TokenKind.CREATE:
             node = self._parse_create()
+        elif tok.kind == TokenKind.ALTER:
+            node = self._parse_alter()
         elif tok.kind == TokenKind.DROP:
             node = self._parse_drop()
         elif tok.kind == TokenKind.SHOW:
@@ -191,38 +200,15 @@ class Parser:
                     self._expect(TokenKind.MODEL)
                     model = self._expect(TokenKind.STRING).value
 
-            # ── Optional QUANTIZE clause ──────────────────────────────────
-            quantization: QuantizationConfig | None = None
-            payload_m: int | None = None
-            seen_quantize = False
-            seen_hnsw = False
-            while self._peek().kind in (TokenKind.QUANTIZE, TokenKind.HNSW):
-                if self._peek().kind == TokenKind.QUANTIZE:
-                    if seen_quantize:
-                        raise QQLSyntaxError(
-                            "QUANTIZE clause may only appear once",
-                            self._peek().pos,
-                        )
-                    self._advance()  # consume QUANTIZE
-                    quantization = self._parse_quantize_clause()
-                    seen_quantize = True
-                    continue
-
-                if seen_hnsw:
-                    raise QQLSyntaxError(
-                        "HNSW clause may only appear once",
-                        self._peek().pos,
-                    )
-                self._advance()  # consume HNSW
-                payload_m = self._parse_collection_hnsw_clause()
-                seen_hnsw = True
+            config = self._parse_collection_config_blocks(for_alter=False)
+            quantization = self._parse_optional_create_quantization()
 
             return CreateCollectionStmt(
                 collection=collection,
                 hybrid=hybrid,
                 model=model,
                 quantization=quantization,
-                payload_m=payload_m,
+                config=config,
             )
 
         self._expect(TokenKind.INDEX)
@@ -244,21 +230,258 @@ class Parser:
             options=options,
         )
 
-    def _parse_collection_hnsw_clause(self) -> int:
-        config = self._parse_dict()
-        unknown_keys = set(config) - {"payload_m"}
-        if unknown_keys:
+    def _parse_alter(self) -> AlterCollectionStmt:
+        self._expect(TokenKind.ALTER)
+        self._expect(TokenKind.COLLECTION)
+        collection = self._parse_identifier()
+        config = self._parse_collection_config_blocks(for_alter=True)
+        quantization = self._parse_optional_alter_quantization()
+        if config is None and quantization is None:
             raise QQLSyntaxError(
-                "Unknown HNSW parameter "
-                f"'{sorted(unknown_keys)[0]}'. Expected: payload_m",
-                0,
+                "ALTER COLLECTION requires at least one WITH HNSW/VECTORS/OPTIMIZERS/PARAMS clause or QUANTIZE clause",
+                self._peek().pos,
             )
-        if "payload_m" not in config:
-            raise QQLSyntaxError("HNSW clause requires payload_m", 0)
-        payload_m = config["payload_m"]
-        if not isinstance(payload_m, int) or isinstance(payload_m, bool) or payload_m <= 0:
-            raise QQLSyntaxError("payload_m must be a positive integer", 0)
-        return payload_m
+        return AlterCollectionStmt(
+            collection=collection,
+            config=config,
+            quantization=quantization,
+        )
+
+    def _parse_collection_config_blocks(self, *, for_alter: bool) -> CollectionConfig | None:
+        config: CollectionConfig | None = None
+        while self._peek().kind == TokenKind.WITH:
+            self._advance()
+            block = self._parse_collection_config_clause(for_alter=for_alter)
+            config = block if config is None else self._merge_collection_config(config, block)
+        return config
+
+    def _parse_optional_create_quantization(self) -> QuantizationConfig | None:
+        if self._peek().kind != TokenKind.QUANTIZE:
+            return None
+        self._advance()
+        return self._parse_quantize_clause()
+
+    def _parse_optional_alter_quantization(self) -> QuantizationUpdate | None:
+        if self._peek().kind != TokenKind.QUANTIZE:
+            return None
+        self._advance()
+        if self._peek().kind == TokenKind.DISABLED:
+            self._advance()
+            return QuantizationUpdate(disabled=True)
+        return QuantizationUpdate(config=self._parse_quantize_clause())
+
+    def _parse_collection_config_clause(self, *, for_alter: bool) -> CollectionConfig:
+        tok = self._peek()
+        if tok.kind == TokenKind.HNSW:
+            self._advance()
+            config = self._parse_dict()
+            unknown_keys = set(config) - {
+                "m",
+                "ef_construct",
+                "full_scan_threshold",
+                "max_indexing_threads",
+                "on_disk",
+                "payload_m",
+                "inline_storage",
+            }
+            if unknown_keys:
+                raise QQLSyntaxError(
+                    "Unknown HNSW parameter "
+                    f"'{sorted(unknown_keys)[0]}'. Expected: m, ef_construct, full_scan_threshold, max_indexing_threads, on_disk, payload_m, inline_storage",
+                    0,
+                )
+            return CollectionConfig(
+                hnsw=HnswRuntimeConfig(
+                    m=self._collection_min_int(config, "m", minimum=4),
+                    ef_construct=self._collection_positive_int(config, "ef_construct"),
+                    full_scan_threshold=self._collection_non_negative_int(config, "full_scan_threshold"),
+                    max_indexing_threads=self._collection_positive_int(config, "max_indexing_threads"),
+                    on_disk=self._collection_bool(config, "on_disk"),
+                    payload_m=self._collection_positive_int(config, "payload_m"),
+                    inline_storage=self._collection_bool(config, "inline_storage"),
+                )
+            )
+        if tok.kind == TokenKind.VECTORS:
+            self._advance()
+            config = self._parse_dict()
+            unknown_keys = set(config) - {"on_disk"}
+            if unknown_keys:
+                raise QQLSyntaxError(
+                    "Unknown VECTORS parameter "
+                    f"'{sorted(unknown_keys)[0]}'. Expected: on_disk",
+                    0,
+                )
+            return CollectionConfig(
+                vectors=VectorsConfig(
+                    on_disk=self._collection_bool(config, "on_disk"),
+                )
+            )
+        if tok.kind == TokenKind.OPTIMIZERS:
+            self._advance()
+            config = self._parse_dict()
+            unknown_keys = set(config) - {
+                "deleted_threshold",
+                "vacuum_min_vector_number",
+                "default_segment_number",
+                "max_segment_size",
+                "memmap_threshold",
+                "indexing_threshold",
+                "flush_interval_sec",
+                "max_optimization_threads",
+                "prevent_unoptimized",
+            }
+            if unknown_keys:
+                raise QQLSyntaxError(
+                    "Unknown OPTIMIZERS parameter "
+                    f"'{sorted(unknown_keys)[0]}'. Expected: deleted_threshold, vacuum_min_vector_number, default_segment_number, max_segment_size, memmap_threshold, indexing_threshold, flush_interval_sec, max_optimization_threads, prevent_unoptimized",
+                    0,
+                )
+            return CollectionConfig(
+                optimizers=OptimizersRuntimeConfig(
+                    deleted_threshold=self._collection_float_range(
+                        config,
+                        "deleted_threshold",
+                        minimum=0.0,
+                        maximum=1.0,
+                    ),
+                    vacuum_min_vector_number=self._collection_positive_int(config, "vacuum_min_vector_number"),
+                    default_segment_number=self._collection_positive_int(config, "default_segment_number"),
+                    max_segment_size=self._collection_positive_int(config, "max_segment_size"),
+                    memmap_threshold=self._collection_non_negative_int(config, "memmap_threshold"),
+                    indexing_threshold=self._collection_non_negative_int(config, "indexing_threshold"),
+                    flush_interval_sec=self._collection_positive_int(config, "flush_interval_sec"),
+                    max_optimization_threads=self._collection_max_optimization_threads(config, "max_optimization_threads"),
+                    prevent_unoptimized=self._collection_bool(config, "prevent_unoptimized"),
+                )
+            )
+        if tok.kind == TokenKind.PARAMS:
+            self._advance()
+            config = self._parse_dict()
+            unknown_keys = set(config) - {
+                "replication_factor",
+                "write_consistency_factor",
+                "read_fan_out_factor",
+                "read_fan_out_delay_ms",
+                "on_disk_payload",
+            }
+            if unknown_keys:
+                raise QQLSyntaxError(
+                    "Unknown PARAMS parameter "
+                    f"'{sorted(unknown_keys)[0]}'. Expected: replication_factor, write_consistency_factor, read_fan_out_factor, read_fan_out_delay_ms, on_disk_payload",
+                    0,
+                )
+            if not for_alter and (
+                "read_fan_out_factor" in config or "read_fan_out_delay_ms" in config
+            ):
+                raise QQLSyntaxError(
+                    "WITH PARAMS { read_fan_out_factor, read_fan_out_delay_ms } is supported only for ALTER COLLECTION",
+                    0,
+                )
+            return CollectionConfig(
+                params=CollectionParamsConfig(
+                    replication_factor=self._collection_positive_int(config, "replication_factor"),
+                    write_consistency_factor=self._collection_positive_int(config, "write_consistency_factor"),
+                    read_fan_out_factor=self._collection_positive_int(config, "read_fan_out_factor"),
+                    read_fan_out_delay_ms=self._collection_non_negative_int(config, "read_fan_out_delay_ms"),
+                    on_disk_payload=self._collection_bool(config, "on_disk_payload"),
+                )
+            )
+        raise QQLSyntaxError(
+            f"Expected HNSW, VECTORS, OPTIMIZERS, or PARAMS after WITH, got '{tok.value}'",
+            tok.pos,
+        )
+
+    def _merge_collection_config(
+        self,
+        current: CollectionConfig,
+        new: CollectionConfig,
+    ) -> CollectionConfig:
+        return CollectionConfig(
+            vectors=self._merge_config_block("VECTORS", current.vectors, new.vectors),
+            hnsw=self._merge_config_block("HNSW", current.hnsw, new.hnsw),
+            optimizers=self._merge_config_block("OPTIMIZERS", current.optimizers, new.optimizers),
+            params=self._merge_config_block("PARAMS", current.params, new.params),
+        )
+
+    def _merge_config_block(self, name: str, current: Any, new: Any) -> Any:
+        if new is None:
+            return current
+        if current is None:
+            return new
+        raise QQLSyntaxError(
+            f"{name} clause may only appear once",
+            self._peek().pos,
+        )
+
+    def _collection_positive_int(self, config: dict[str, Any], key: str) -> int | None:
+        if key not in config:
+            return None
+        value = config[key]
+        if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+            raise QQLSyntaxError(f"{key} must be a positive integer", 0)
+        return value
+
+    def _collection_min_int(
+        self,
+        config: dict[str, Any],
+        key: str,
+        minimum: int,
+    ) -> int | None:
+        value = self._collection_positive_int(config, key)
+        if value is not None and value < minimum:
+            raise QQLSyntaxError(f"{key} must be >= {minimum}", 0)
+        return value
+
+    def _collection_non_negative_int(self, config: dict[str, Any], key: str) -> int | None:
+        if key not in config:
+            return None
+        value = config[key]
+        if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+            raise QQLSyntaxError(f"{key} must be a non-negative integer", 0)
+        return value
+
+    def _collection_float_range(
+        self,
+        config: dict[str, Any],
+        key: str,
+        minimum: float,
+        maximum: float,
+    ) -> float | None:
+        if key not in config:
+            return None
+        value = config[key]
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise QQLSyntaxError(f"{key} must be a number", 0)
+        value = float(value)
+        if not minimum <= value <= maximum:
+            raise QQLSyntaxError(f"{key} must be between {minimum} and {maximum}", 0)
+        return value
+
+    def _collection_max_optimization_threads(
+        self,
+        config: dict[str, Any],
+        key: str,
+    ) -> int | str | None:
+        if key not in config:
+            return None
+        value = config[key]
+        if isinstance(value, bool):
+            raise QQLSyntaxError(f"{key} must be a positive integer or 'auto'", 0)
+        if isinstance(value, int):
+            if value <= 0:
+                raise QQLSyntaxError(f"{key} must be a positive integer or 'auto'", 0)
+            return value
+        if isinstance(value, str) and value.lower() == "auto":
+            return "auto"
+        raise QQLSyntaxError(f"{key} must be a positive integer or 'auto'", 0)
+
+    def _collection_bool(self, config: dict[str, Any], key: str) -> bool | None:
+        if key not in config:
+            return None
+        value = config[key]
+        if not isinstance(value, bool):
+            raise QQLSyntaxError(f"{key} must be true or false", 0)
+        return value
 
     def _parse_quantize_clause(self) -> QuantizationConfig:
         """Parse: (SCALAR | BINARY | PRODUCT) [QUANTILE <float>] [ALWAYS RAM]

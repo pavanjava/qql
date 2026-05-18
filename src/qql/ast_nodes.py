@@ -40,6 +40,58 @@ class QuantizationSearchWith:
     oversampling: float | None = None
 
 
+@dataclass(frozen=True)
+class VectorsConfig:
+    on_disk: bool | None = None
+
+
+@dataclass(frozen=True)
+class HnswRuntimeConfig:
+    m: int | None = None
+    ef_construct: int | None = None
+    full_scan_threshold: int | None = None
+    max_indexing_threads: int | None = None
+    on_disk: bool | None = None
+    payload_m: int | None = None
+    inline_storage: bool | None = None
+
+
+@dataclass(frozen=True)
+class OptimizersRuntimeConfig:
+    deleted_threshold: float | None = None
+    vacuum_min_vector_number: int | None = None
+    default_segment_number: int | None = None
+    max_segment_size: int | None = None
+    memmap_threshold: int | None = None
+    indexing_threshold: int | None = None
+    flush_interval_sec: int | None = None
+    max_optimization_threads: int | str | None = None
+    prevent_unoptimized: bool | None = None
+
+
+@dataclass(frozen=True)
+class CollectionParamsConfig:
+    replication_factor: int | None = None
+    write_consistency_factor: int | None = None
+    read_fan_out_factor: int | None = None
+    read_fan_out_delay_ms: int | None = None
+    on_disk_payload: bool | None = None
+
+
+@dataclass(frozen=True)
+class CollectionConfig:
+    vectors: VectorsConfig | None = None
+    hnsw: HnswRuntimeConfig | None = None
+    optimizers: OptimizersRuntimeConfig | None = None
+    params: CollectionParamsConfig | None = None
+
+
+@dataclass(frozen=True)
+class QuantizationUpdate:
+    config: QuantizationConfig | None = None
+    disabled: bool = False
+
+
 # ── Filter expression leaf nodes ──────────────────────────────────────────────
 
 @dataclass(frozen=True)
@@ -172,7 +224,14 @@ class CreateCollectionStmt:
     hybrid: bool = False                      # if True, create with dense + sparse named vectors
     model: str | None = None                  # dense model; None → use config default
     quantization: QuantizationConfig | None = None  # optional QUANTIZE clause
-    payload_m: int | None = None              # optional HNSW { payload_m: N } clause
+    config: CollectionConfig | None = None
+
+
+@dataclass(frozen=True)
+class AlterCollectionStmt:
+    collection: str
+    config: CollectionConfig | None = None
+    quantization: QuantizationUpdate | None = None
 
 
 @dataclass(frozen=True)
@@ -274,6 +333,7 @@ ASTNode = (
     InsertStmt
     | InsertBulkStmt
     | CreateCollectionStmt
+    | AlterCollectionStmt
     | CreateIndexStmt
     | DropCollectionStmt
     | ShowCollectionsStmt

@@ -50,6 +50,12 @@ class TestStripComments:
         assert "DROP" in result
         assert "leading" not in result
 
+    def test_preserves_double_dash_inside_string_literal(self):
+        text = "INSERT INTO COLLECTION x VALUES {'text': 'hello--world'} -- trailing comment"
+        result = strip_comments(text)
+        assert "hello--world" in result
+        assert "trailing comment" not in result
+
 
 # ── split_statements ──────────────────────────────────────────────────────────
 
@@ -133,6 +139,18 @@ class TestSplitStatements:
         chunks = split_statements(tokens)
         assert len(chunks) == 3
         assert chunks[1][0].kind == TokenKind.SELECT
+
+    def test_alter_starts_new_top_level_statement(self):
+        from qql.lexer import TokenKind
+
+        tokens = tokenize(
+            "CREATE COLLECTION x\n"
+            "ALTER COLLECTION x WITH HNSW { payload_m: 24 }\n"
+            "SHOW COLLECTIONS"
+        )
+        chunks = split_statements(tokens)
+        assert len(chunks) == 3
+        assert chunks[1][0].kind == TokenKind.ALTER
 
 
 # ── run_script ────────────────────────────────────────────────────────────────

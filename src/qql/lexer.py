@@ -31,7 +31,12 @@ class TokenKind(Enum):
     TURBO    = auto()
     BITS     = auto()
     HNSW     = auto()
+    VECTORS = auto()
+    OPTIMIZERS = auto()
+    PARAMS = auto()
+    DISABLED = auto()
     CREATE = auto()
+    ALTER = auto()
     INDEX = auto()
     ON = auto()
     DROP = auto()
@@ -131,7 +136,12 @@ _KEYWORDS: dict[str, TokenKind] = {
     "TURBO":    TokenKind.TURBO,
     "BITS":     TokenKind.BITS,
     "HNSW":     TokenKind.HNSW,
+    "VECTORS": TokenKind.VECTORS,
+    "OPTIMIZERS": TokenKind.OPTIMIZERS,
+    "PARAMS": TokenKind.PARAMS,
+    "DISABLED": TokenKind.DISABLED,
     "CREATE": TokenKind.CREATE,
+    "ALTER": TokenKind.ALTER,
     "INDEX": TokenKind.INDEX,
     "ON": TokenKind.ON,
     "DROP": TokenKind.DROP,

@@ -11,8 +11,10 @@ from qdrant_client.models import (
     AcornSearchParams,
     BinaryQuantization,
     BinaryQuantizationConfig,
+    CollectionParamsDiff,
     CompressionRatio,
     Distance,
+    Disabled,
     FieldCondition,
     Filter,
     Fusion,
@@ -34,6 +36,7 @@ from qdrant_client.models import (
     Mmr,
     Modifier,
     NearestQuery,
+    OptimizersConfigDiff,
     PayloadField,
     PayloadSchemaType,
     PointStruct,
@@ -62,12 +65,17 @@ from qdrant_client.models import (
     UuidIndexParams,
     UuidIndexType,
     VectorParams,
+    VectorParamsDiff,
+    MaxOptimizationThreadsSetting,
 )
 
 from .ast_nodes import (
     ASTNode,
+    AlterCollectionStmt,
     AndExpr,
     BetweenExpr,
+    CollectionParamsConfig,
+    CollectionConfig,
     CompareExpr,
     CreateCollectionStmt,
     CreateIndexStmt,
@@ -86,7 +94,9 @@ from .ast_nodes import (
     MatchTextExpr,
     NotExpr,
     NotInExpr,
+    OptimizersRuntimeConfig,
     OrExpr,
+    QuantizationUpdate,
     QuantizationConfig,
     QuantizationType,
     RecommendStmt,
@@ -98,6 +108,8 @@ from .ast_nodes import (
     ShowCollectionsStmt,
     UpdateVectorStmt,
     UpdatePayloadStmt,
+    VectorsConfig,
+    HnswRuntimeConfig,
 )
 from .config import QQLConfig
 from .embedder import CrossEncoderEmbedder, Embedder, SparseEmbedder
@@ -128,6 +140,8 @@ class Executor:
             return self._execute_insert(node)
         if isinstance(node, CreateCollectionStmt):
             return self._execute_create(node)
+        if isinstance(node, AlterCollectionStmt):
+            return self._execute_alter_collection(node)
         if isinstance(node, CreateIndexStmt):
             return self._execute_create_index(node)
         if isinstance(node, DropCollectionStmt):
@@ -218,6 +232,7 @@ class Executor:
         vector = embedder.embed(node.values["text"])
 
         self._ensure_collection(node.collection, len(vector))
+        point_vector = self._build_dense_point_vector(node.collection, vector)
 
         point_id, payload = self._extract_point_id_and_payload(node.values)
 
@@ -225,7 +240,7 @@ class Executor:
             self._client.upsert(
                 collection_name=node.collection,
                 wait=True,
-                points=[PointStruct(id=point_id, vector=vector, payload=payload)],
+                points=[PointStruct(id=point_id, vector=point_vector, payload=payload)],
             )
         except UnexpectedResponse as e:
             raise QQLRuntimeError(f"Qdrant error during INSERT: {e}") from e
@@ -306,11 +321,12 @@ class Executor:
         for vals in node.values_list:
             vector = embedder.embed(vals["text"])
             point_id, payload = self._extract_point_id_and_payload(vals)
+            point_vector = self._build_dense_point_vector(node.collection, vector)
             points.append(
-                PointStruct(id=point_id, vector=vector, payload=payload)
+                PointStruct(id=point_id, vector=point_vector, payload=payload)
             )
 
-        self._ensure_collection(node.collection, len(points[0].vector))
+        self._ensure_collection(node.collection, len(vector))
 
         try:
             self._client.upsert(
@@ -346,12 +362,15 @@ class Executor:
             if node.quantization is not None
             else ""
         )
-        hnsw_config = (
-            HnswConfigDiff(payload_m=node.payload_m)
-            if node.payload_m is not None
+        hnsw_config = self._build_hnsw_config(node.config)
+        optimizers_config = self._build_optimizers_config(node.config)
+        params_config = self._build_collection_params_create_kwargs(node.config)
+        config_label = self._describe_collection_config(node.config)
+        vector_on_disk = (
+            node.config.vectors.on_disk
+            if node.config is not None and node.config.vectors is not None
             else None
         )
-        hnsw_label = f", payload_m={node.payload_m}" if node.payload_m is not None else ""
 
         # ── Hybrid collection: named dense + sparse vectors ────────────────
         if node.hybrid:
@@ -360,7 +379,11 @@ class Executor:
             create_kwargs: dict[str, Any] = {
                 "collection_name": node.collection,
                 "vectors_config": {
-                    "dense": VectorParams(size=dims, distance=Distance.COSINE)
+                    "dense": VectorParams(
+                        size=dims,
+                        distance=Distance.COSINE,
+                        on_disk=vector_on_disk,
+                    )
                 },
                 "sparse_vectors_config": {
                     "sparse": SparseVectorParams(modifier=Modifier.IDF)
@@ -370,12 +393,15 @@ class Executor:
                 create_kwargs["quantization_config"] = quant_config
             if hnsw_config is not None:
                 create_kwargs["hnsw_config"] = hnsw_config
+            if optimizers_config is not None:
+                create_kwargs["optimizers_config"] = optimizers_config
+            create_kwargs.update(params_config)
             self._create_collection_and_wait(**create_kwargs)
             return ExecutionResult(
                 success=True,
                 message=(
                     f"Collection '{node.collection}' created "
-                    f"(hybrid: {dims}-dim dense + BM25 sparse, cosine distance{quant_label}{hnsw_label})"
+                    f"(hybrid: {dims}-dim dense + BM25 sparse, cosine distance{quant_label}{config_label})"
                 ),
             )
 
@@ -384,16 +410,59 @@ class Executor:
         dims = embedder.dimensions
         create_kwargs = {
             "collection_name": node.collection,
-            "vectors_config": VectorParams(size=dims, distance=Distance.COSINE),
+            "vectors_config": VectorParams(
+                size=dims,
+                distance=Distance.COSINE,
+                on_disk=vector_on_disk,
+            ),
         }
         if quant_config is not None:
             create_kwargs["quantization_config"] = quant_config
         if hnsw_config is not None:
             create_kwargs["hnsw_config"] = hnsw_config
+        if optimizers_config is not None:
+            create_kwargs["optimizers_config"] = optimizers_config
+        create_kwargs.update(params_config)
         self._create_collection_and_wait(**create_kwargs)
         return ExecutionResult(
             success=True,
-            message=f"Collection '{node.collection}' created ({dims}-dimensional vectors, cosine distance{quant_label}{hnsw_label})",
+            message=f"Collection '{node.collection}' created ({dims}-dimensional vectors, cosine distance{quant_label}{config_label})",
+        )
+
+    def _execute_alter_collection(self, node: AlterCollectionStmt) -> ExecutionResult:
+        if not self._client.collection_exists(node.collection):
+            raise QQLRuntimeError(f"Collection '{node.collection}' does not exist")
+
+        update_kwargs: dict[str, Any] = {"collection_name": node.collection}
+        vectors_config = self._build_vectors_config_diff(node.collection, node.config)
+        hnsw_config = self._build_hnsw_config(node.config)
+        optimizers_config = self._build_optimizers_config(node.config)
+        collection_params = self._build_collection_params_diff(node.config)
+        quantization_config = self._build_alter_quantization_config(node.quantization)
+
+        if vectors_config is not None:
+            update_kwargs["vectors_config"] = vectors_config
+        if hnsw_config is not None:
+            update_kwargs["hnsw_config"] = hnsw_config
+        if optimizers_config is not None:
+            update_kwargs["optimizers_config"] = optimizers_config
+        if collection_params is not None:
+            update_kwargs["collection_params"] = collection_params
+        if quantization_config is not None:
+            update_kwargs["quantization_config"] = quantization_config
+
+        try:
+            self._client.update_collection(**update_kwargs)
+        except UnexpectedResponse as e:
+            raise QQLRuntimeError(f"Qdrant error during ALTER COLLECTION: {e}") from e
+
+        return ExecutionResult(
+            success=True,
+            message=(
+                f"Collection '{node.collection}' altered"
+                f"{self._describe_collection_config(node.config)}"
+                f"{self._describe_quantization_update(node.quantization)}"
+            ),
         )
 
     def _execute_create_index(self, node: CreateIndexStmt) -> ExecutionResult:
@@ -471,6 +540,7 @@ class Executor:
                 vector_details[vname] = {
                     "size": vconfig.size,
                     "distance": str(vconfig.distance) if vconfig.distance else None,
+                    "on_disk": vconfig.on_disk,
                 }
         elif vectors is None:
             raise QQLRuntimeError(
@@ -481,6 +551,7 @@ class Executor:
                 "": {
                     "size": vectors.size,
                     "distance": str(vectors.distance) if vectors.distance else None,
+                    "on_disk": vectors.on_disk,
                 }
             }
         topology = "hybrid" if sparse_vector_params else "dense"
@@ -522,6 +593,8 @@ class Executor:
             hnsw["on_disk"] = config.hnsw_config.on_disk
         if config.hnsw_config.payload_m is not None:
             hnsw["payload_m"] = config.hnsw_config.payload_m
+        if config.hnsw_config.inline_storage is not None:
+            hnsw["inline_storage"] = config.hnsw_config.inline_storage
 
         # ── Payload schema / indexes ───────────────────────────────────────
         payload_indexes = {}
@@ -533,6 +606,9 @@ class Executor:
             "shard_number": params.shard_number,
             "replication_factor": params.replication_factor,
             "write_consistency_factor": params.write_consistency_factor,
+            "read_fan_out_factor": params.read_fan_out_factor,
+            "read_fan_out_delay_ms": params.read_fan_out_delay_ms,
+            "on_disk_payload": params.on_disk_payload,
         }
 
         data = {
@@ -1057,6 +1133,165 @@ class Executor:
             acorn=AcornSearchParams(enable=True) if with_clause.acorn else None,
         )
 
+    def _build_hnsw_config(self, config: CollectionConfig | None) -> HnswConfigDiff | None:
+        if config is None or config.hnsw is None:
+            return None
+        hnsw = config.hnsw
+        return HnswConfigDiff(
+            m=hnsw.m,
+            ef_construct=hnsw.ef_construct,
+            full_scan_threshold=hnsw.full_scan_threshold,
+            max_indexing_threads=hnsw.max_indexing_threads,
+            on_disk=hnsw.on_disk,
+            payload_m=hnsw.payload_m,
+            inline_storage=hnsw.inline_storage,
+        )
+
+    def _build_optimizers_config(
+        self,
+        config: CollectionConfig | None,
+    ) -> OptimizersConfigDiff | None:
+        if config is None or config.optimizers is None:
+            return None
+        optimizers = config.optimizers
+        max_optimization_threads = optimizers.max_optimization_threads
+        if max_optimization_threads == "auto":
+            max_optimization_threads = MaxOptimizationThreadsSetting.AUTO
+        return OptimizersConfigDiff(
+            deleted_threshold=optimizers.deleted_threshold,
+            vacuum_min_vector_number=optimizers.vacuum_min_vector_number,
+            default_segment_number=optimizers.default_segment_number,
+            max_segment_size=optimizers.max_segment_size,
+            memmap_threshold=optimizers.memmap_threshold,
+            indexing_threshold=optimizers.indexing_threshold,
+            flush_interval_sec=optimizers.flush_interval_sec,
+            max_optimization_threads=max_optimization_threads,
+            prevent_unoptimized=optimizers.prevent_unoptimized,
+        )
+
+    def _build_collection_params_create_kwargs(
+        self,
+        config: CollectionConfig | None,
+    ) -> dict[str, Any]:
+        if config is None or config.params is None:
+            return {}
+        params = config.params
+        create_kwargs: dict[str, Any] = {}
+        if params.replication_factor is not None:
+            create_kwargs["replication_factor"] = params.replication_factor
+        if params.write_consistency_factor is not None:
+            create_kwargs["write_consistency_factor"] = params.write_consistency_factor
+        if params.on_disk_payload is not None:
+            create_kwargs["on_disk_payload"] = params.on_disk_payload
+        return create_kwargs
+
+    def _build_collection_params_diff(
+        self,
+        config: CollectionConfig | None,
+    ) -> CollectionParamsDiff | None:
+        if config is None or config.params is None:
+            return None
+        params = config.params
+        return CollectionParamsDiff(
+            replication_factor=params.replication_factor,
+            write_consistency_factor=params.write_consistency_factor,
+            read_fan_out_factor=params.read_fan_out_factor,
+            read_fan_out_delay_ms=params.read_fan_out_delay_ms,
+            on_disk_payload=params.on_disk_payload,
+        )
+
+    def _build_vectors_config_diff(
+        self,
+        collection_name: str,
+        config: CollectionConfig | None,
+    ) -> dict[str, VectorParamsDiff] | None:
+        if config is None or config.vectors is None:
+            return None
+        vector_name = self._get_dense_vector_name(collection_name)
+        if vector_name is None:
+            vector_name = ""
+        return {
+            vector_name: VectorParamsDiff(on_disk=config.vectors.on_disk),
+        }
+
+    def _build_alter_quantization_config(
+        self,
+        quantization: QuantizationUpdate | None,
+    ) -> (
+        ScalarQuantization | BinaryQuantization | ProductQuantization | TurboQuantization | Disabled | None
+    ):
+        if quantization is None:
+            return None
+        if quantization.disabled:
+            return Disabled.DISABLED
+        if quantization.config is None:
+            return None
+        return self._build_quantization_config(quantization.config)
+
+    def _describe_collection_config(self, config: CollectionConfig | None) -> str:
+        if config is None:
+            return ""
+        labels: list[str] = []
+        if config.vectors is not None and config.vectors.on_disk is not None:
+            labels.append(f"vectors.on_disk={config.vectors.on_disk}")
+        if config.hnsw is not None:
+            hnsw = config.hnsw
+            if hnsw.m is not None:
+                labels.append(f"hnsw.m={hnsw.m}")
+            if hnsw.ef_construct is not None:
+                labels.append(f"hnsw.ef_construct={hnsw.ef_construct}")
+            if hnsw.full_scan_threshold is not None:
+                labels.append(f"hnsw.full_scan_threshold={hnsw.full_scan_threshold}")
+            if hnsw.max_indexing_threads is not None:
+                labels.append(f"hnsw.max_indexing_threads={hnsw.max_indexing_threads}")
+            if hnsw.on_disk is not None:
+                labels.append(f"hnsw.on_disk={hnsw.on_disk}")
+            if hnsw.payload_m is not None:
+                labels.append(f"hnsw.payload_m={hnsw.payload_m}")
+            if hnsw.inline_storage is not None:
+                labels.append(f"hnsw.inline_storage={hnsw.inline_storage}")
+        if config.optimizers is not None:
+            optimizers = config.optimizers
+            for key in (
+                "deleted_threshold",
+                "vacuum_min_vector_number",
+                "default_segment_number",
+                "max_segment_size",
+                "memmap_threshold",
+                "indexing_threshold",
+                "flush_interval_sec",
+                "max_optimization_threads",
+                "prevent_unoptimized",
+            ):
+                value = getattr(optimizers, key)
+                if value is not None:
+                    labels.append(f"optimizers.{key}={value}")
+        if config.params is not None:
+            params = config.params
+            for key in (
+                "replication_factor",
+                "write_consistency_factor",
+                "read_fan_out_factor",
+                "read_fan_out_delay_ms",
+                "on_disk_payload",
+            ):
+                value = getattr(params, key)
+                if value is not None:
+                    labels.append(f"params.{key}={value}")
+        return f", {', '.join(labels)}" if labels else ""
+
+    def _describe_quantization_update(
+        self,
+        quantization: QuantizationUpdate | None,
+    ) -> str:
+        if quantization is None:
+            return ""
+        if quantization.disabled:
+            return ", quantization=disabled"
+        if quantization.config is not None:
+            return f", quantization={quantization.config.type.value}"
+        return ""
+
     def _has_mmr(self, with_clause: SearchWith | None) -> bool:
         return with_clause is not None and (
             with_clause.mmr_diversity is not None or with_clause.mmr_candidates is not None
@@ -1158,6 +1393,18 @@ class Executor:
         if isinstance(vectors, dict):
             return "dense"
         return None
+
+    def _build_dense_point_vector(
+        self,
+        collection_name: str,
+        vector: list[float],
+    ) -> list[float] | dict[str, list[float]]:
+        if not self._client.collection_exists(collection_name):
+            return vector
+        vector_name = self._get_dense_vector_name(collection_name)
+        if vector_name is None:
+            return vector
+        return {vector_name: vector}
 
     def _apply_reranking(
         self,
@@ -1499,12 +1746,12 @@ class Executor:
         raise QQLRuntimeError(f"Unknown quantization type: {qc.type}")
 
     def _collection_is_hybrid(self, name: str) -> bool:
-        """Return True if *name* exists and uses named vectors (hybrid collection)."""
+        """Return True if *name* exists and uses sparse vectors (hybrid collection)."""
         if not self._client.collection_exists(name):
             return False
         info = self._client.get_collection(name)
-        vectors = info.config.params.vectors  # type: ignore[union-attr]
-        return isinstance(vectors, dict)
+        sparse_vectors = info.config.params.sparse_vectors
+        return isinstance(sparse_vectors, dict) and bool(sparse_vectors)
 
     def _ensure_collection(self, name: str, vector_size: int) -> None:
         """Create the collection if it doesn't exist. Raises on dimension mismatch.

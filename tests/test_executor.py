@@ -1,13 +1,19 @@
 import pytest
 
 from qql.ast_nodes import (
+    AlterCollectionStmt,
+    CollectionParamsConfig,
+    CollectionConfig,
     CreateCollectionStmt,
     CreateIndexStmt,
     DeleteStmt,
+    HnswRuntimeConfig,
     DropCollectionStmt,
     InsertBulkStmt,
     InsertStmt,
+    OptimizersRuntimeConfig,
     QuantizationConfig,
+    QuantizationUpdate,
     QuantizationSearchWith,
     QuantizationType,
     RecommendStmt,
@@ -17,9 +23,11 @@ from qql.ast_nodes import (
     SearchWith,
     ShowCollectionStmt,
     ShowCollectionsStmt,
+    VectorsConfig,
 )
 from qql.config import QQLConfig
 from qql.exceptions import QQLRuntimeError
+from qql.cli import _format_collection_diagnostics
 from qql.executor import Executor
 
 
@@ -247,11 +255,59 @@ class TestCreate:
     def test_create_collection_passes_payload_m(self, executor, mock_client):
         from qdrant_client.models import HnswConfigDiff
 
-        node = CreateCollectionStmt(collection="new_col", payload_m=24)
+        node = CreateCollectionStmt(
+            collection="new_col",
+            config=CollectionConfig(hnsw=HnswRuntimeConfig(payload_m=24)),
+        )
         executor.execute(node)
         kw = mock_client.create_collection.call_args.kwargs
         assert isinstance(kw["hnsw_config"], HnswConfigDiff)
         assert kw["hnsw_config"].payload_m == 24
+
+    def test_create_collection_passes_all_new_config_blocks(self, executor, mock_client):
+        node = CreateCollectionStmt(
+            collection="new_col",
+            config=CollectionConfig(
+                vectors=VectorsConfig(on_disk=True),
+                hnsw=HnswRuntimeConfig(
+                    m=32,
+                    ef_construct=200,
+                    full_scan_threshold=5000,
+                    max_indexing_threads=2,
+                    on_disk=True,
+                    payload_m=24,
+                    inline_storage=False,
+                ),
+                optimizers=OptimizersRuntimeConfig(
+                    indexing_threshold=10000,
+                    memmap_threshold=20000,
+                    deleted_threshold=0.2,
+                    max_optimization_threads="auto",
+                ),
+                params=CollectionParamsConfig(
+                    replication_factor=2,
+                    write_consistency_factor=1,
+                    on_disk_payload=True,
+                ),
+            ),
+        )
+        executor.execute(node)
+        kw = mock_client.create_collection.call_args.kwargs
+        assert kw["vectors_config"].on_disk is True
+        assert kw["hnsw_config"].m == 32
+        assert kw["hnsw_config"].ef_construct == 200
+        assert kw["hnsw_config"].full_scan_threshold == 5000
+        assert kw["hnsw_config"].max_indexing_threads == 2
+        assert kw["hnsw_config"].on_disk is True
+        assert kw["hnsw_config"].payload_m == 24
+        assert kw["hnsw_config"].inline_storage is False
+        assert kw["optimizers_config"].deleted_threshold == pytest.approx(0.2)
+        assert kw["optimizers_config"].indexing_threshold == 10000
+        assert kw["optimizers_config"].memmap_threshold == 20000
+        assert kw["optimizers_config"].max_optimization_threads.value == "auto"
+        assert kw["replication_factor"] == 2
+        assert kw["write_consistency_factor"] == 1
+        assert kw["on_disk_payload"] is True
 
     def test_create_existing_collection_is_noop(self, executor, mock_client):
         mock_client.collection_exists.return_value = True
@@ -260,6 +316,72 @@ class TestCreate:
         mock_client.create_collection.assert_not_called()
         assert result.success is True
         assert "already exists" in result.message
+
+    def test_alter_collection_passes_all_new_config_blocks(self, executor, mock_client):
+        mock_client.collection_exists.return_value = True
+        node = AlterCollectionStmt(
+            collection="new_col",
+            config=CollectionConfig(
+                vectors=VectorsConfig(on_disk=True),
+                hnsw=HnswRuntimeConfig(full_scan_threshold=5000),
+                optimizers=OptimizersRuntimeConfig(indexing_threshold=10000),
+                params=CollectionParamsConfig(
+                    on_disk_payload=False,
+                    read_fan_out_factor=4,
+                ),
+            ),
+            quantization=QuantizationUpdate(
+                config=QuantizationConfig(type=QuantizationType.BINARY)
+            ),
+        )
+        executor.execute(node)
+        kw = mock_client.update_collection.call_args.kwargs
+        assert kw["vectors_config"][""].on_disk is True
+        assert kw["hnsw_config"].full_scan_threshold == 5000
+        assert kw["optimizers_config"].indexing_threshold == 10000
+        assert kw["collection_params"].on_disk_payload is False
+        assert kw["collection_params"].read_fan_out_factor == 4
+        assert kw["quantization_config"].binary is not None
+
+    def test_alter_collection_named_vectors_use_dense_key(self, executor, mock_client, mocker):
+        from qdrant_client.models import Distance, VectorParams
+
+        mock_client.collection_exists.return_value = True
+        mock_client.get_collection.return_value.config.params.vectors = {
+            "dense": VectorParams(size=384, distance=Distance.COSINE)
+        }
+        node = AlterCollectionStmt(
+            collection="named_col",
+            config=CollectionConfig(vectors=VectorsConfig(on_disk=True)),
+        )
+        executor.execute(node)
+        kw = mock_client.update_collection.call_args.kwargs
+        assert kw["vectors_config"]["dense"].on_disk is True
+
+    def test_alter_collection_can_disable_quantization(self, executor, mock_client):
+        mock_client.collection_exists.return_value = True
+        node = AlterCollectionStmt(
+            collection="new_col",
+            quantization=QuantizationUpdate(disabled=True),
+        )
+        executor.execute(node)
+        kw = mock_client.update_collection.call_args.kwargs
+        assert kw["quantization_config"].value == "Disabled"
+
+    def test_collection_is_hybrid_depends_on_sparse_vectors(self, executor, mock_client, mocker):
+        mock_client.collection_exists.return_value = True
+        mock_client.get_collection.return_value.config.params.vectors = {"dense": object()}
+        mock_client.get_collection.return_value.config.params.sparse_vectors = None
+        assert executor._collection_is_hybrid("named_dense") is False
+
+    def test_insert_named_dense_collection_uses_named_vector_payload(self, executor, mock_client):
+        mock_client.collection_exists.return_value = True
+        mock_client.get_collection.return_value.config.params.vectors = {"dense": object()}
+        mock_client.get_collection.return_value.config.params.sparse_vectors = None
+        node = InsertStmt(collection="named_dense", values={"text": "hello"}, model=None)
+        executor.execute(node)
+        point = mock_client.upsert.call_args.kwargs["points"][0]
+        assert point.vector == {"dense": FAKE_VECTOR}
 
 
 class TestCreateIndex:
@@ -454,10 +576,17 @@ class TestShowCollection:
         mock_info.indexed_vectors_count = 42
         mock_info.segments_count = 2
 
-        mock_info.config.params.vectors = VectorParams(size=384, distance=Distance.COSINE)
+        mock_info.config.params.vectors = VectorParams(
+            size=384,
+            distance=Distance.COSINE,
+            on_disk=True,
+        )
         mock_info.config.params.shard_number = 1
         mock_info.config.params.replication_factor = 1
         mock_info.config.params.write_consistency_factor = 1
+        mock_info.config.params.read_fan_out_factor = None
+        mock_info.config.params.read_fan_out_delay_ms = None
+        mock_info.config.params.on_disk_payload = False
         mock_info.config.params.sparse_vectors = None
         mock_info.config.hnsw_config.m = 16
         mock_info.config.hnsw_config.ef_construct = 100
@@ -480,6 +609,7 @@ class TestShowCollection:
         assert data["topology"] == "dense"
         assert data["vectors"][""]["size"] == 384
         assert data["vectors"][""]["distance"] == "Cosine"
+        assert data["vectors"][""]["on_disk"] is True
         assert data["quantization"] is None
         assert data["hnsw_config"]["m"] == 16
         assert data["hnsw_config"]["ef_construct"] == 100
@@ -512,6 +642,9 @@ class TestShowCollection:
         mock_info.config.params.shard_number = 1
         mock_info.config.params.replication_factor = 1
         mock_info.config.params.write_consistency_factor = 1
+        mock_info.config.params.read_fan_out_factor = None
+        mock_info.config.params.read_fan_out_delay_ms = None
+        mock_info.config.params.on_disk_payload = None
         mock_info.config.hnsw_config.m = 16
         mock_info.config.hnsw_config.ef_construct = 100
         mock_info.config.hnsw_config.full_scan_threshold = None
@@ -554,6 +687,9 @@ class TestShowCollection:
         mock_info.config.params.shard_number = 1
         mock_info.config.params.replication_factor = 1
         mock_info.config.params.write_consistency_factor = 1
+        mock_info.config.params.read_fan_out_factor = None
+        mock_info.config.params.read_fan_out_delay_ms = None
+        mock_info.config.params.on_disk_payload = None
         mock_info.config.hnsw_config.m = 16
         mock_info.config.hnsw_config.ef_construct = 100
         mock_info.config.hnsw_config.full_scan_threshold = None
@@ -600,6 +736,9 @@ class TestShowCollection:
         mock_info.config.params.shard_number = 1
         mock_info.config.params.replication_factor = 1
         mock_info.config.params.write_consistency_factor = 1
+        mock_info.config.params.read_fan_out_factor = None
+        mock_info.config.params.read_fan_out_delay_ms = None
+        mock_info.config.params.on_disk_payload = None
         mock_info.config.params.sparse_vectors = None
         mock_info.config.hnsw_config.m = 16
         mock_info.config.hnsw_config.ef_construct = 100
@@ -607,6 +746,7 @@ class TestShowCollection:
         mock_info.config.hnsw_config.max_indexing_threads = None
         mock_info.config.hnsw_config.on_disk = None
         mock_info.config.hnsw_config.payload_m = None
+        mock_info.config.hnsw_config.inline_storage = True
         mock_info.config.quantization_config = None
         mock_info.payload_schema = {"category": idx_info}
 
@@ -622,6 +762,37 @@ class TestShowCollection:
                 "params": {"is_tenant": True, "on_disk": True},
             }
         }
+        assert result.data["hnsw_config"]["inline_storage"] is True
+
+    def test_format_collection_diagnostics_does_not_duplicate_replication(self):
+        text = _format_collection_diagnostics(
+            {
+                "name": "docs",
+                "status": "green",
+                "points_count": 1,
+                "indexed_vectors_count": 1,
+                "segments_count": 1,
+                "topology": "dense",
+                "vectors": {"": {"size": 384, "distance": "Cosine", "on_disk": True}},
+                "sparse_vectors": None,
+                "quantization": None,
+                "hnsw_config": {"m": 16, "ef_construct": 100, "inline_storage": True},
+                "payload_schema": None,
+                "sharding": {
+                    "shard_number": 1,
+                    "replication_factor": 2,
+                    "write_consistency_factor": 1,
+                    "read_fan_out_factor": 4,
+                    "read_fan_out_delay_ms": 10,
+                    "on_disk_payload": False,
+                },
+            }
+        )
+        assert text.count("Replication factor") == 1
+        assert text.count("Write consistency") == 1
+        assert "Replicas             :" not in text
+        assert "Payload indexes      : none" in text
+        assert "HNSW inline_storage  : True" in text
 
     def test_show_collection_handles_missing_payload_schema(self, executor, mock_client, mocker):
         from qdrant_client.models import (

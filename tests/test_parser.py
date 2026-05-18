@@ -1,8 +1,11 @@
 import pytest
 
 from qql.ast_nodes import (
+    AlterCollectionStmt,
     AndExpr,
     BetweenExpr,
+    CollectionParamsConfig,
+    CollectionConfig,
     CompareExpr,
     CreateCollectionStmt,
     CreateIndexStmt,
@@ -20,7 +23,9 @@ from qql.ast_nodes import (
     MatchTextExpr,
     NotExpr,
     NotInExpr,
+    OptimizersRuntimeConfig,
     OrExpr,
+    QuantizationUpdate,
     QuantizationType,
     QuantizationSearchWith,
     RecommendStmt,
@@ -29,6 +34,8 @@ from qql.ast_nodes import (
     SearchStmt,
     ShowCollectionStmt,
     ShowCollectionsStmt,
+    VectorsConfig,
+    HnswRuntimeConfig,
 )
 from qql.exceptions import QQLSyntaxError
 from qql.lexer import Lexer
@@ -664,6 +671,93 @@ class TestCreateUsing:
     def test_create_using_model_case_insensitive(self):
         node = parse("create collection articles using model 'some/model'")
         assert node.model == "some/model"
+
+
+class TestCollectionConfig:
+    def test_create_with_collection_blocks(self):
+        node = parse(
+            "CREATE COLLECTION articles "
+            "WITH VECTORS { on_disk: true } "
+            "WITH HNSW { m: 32, ef_construct: 200, full_scan_threshold: 5000, "
+            "max_indexing_threads: 2, on_disk: true, payload_m: 24, inline_storage: false } "
+            "WITH OPTIMIZERS { indexing_threshold: 10000, memmap_threshold: 20000, deleted_threshold: 0.2, max_optimization_threads: 'auto' } "
+            "WITH PARAMS { replication_factor: 2, write_consistency_factor: 1, on_disk_payload: true } "
+            "QUANTIZE SCALAR ALWAYS RAM"
+        )
+        assert isinstance(node, CreateCollectionStmt)
+        assert node.config == CollectionConfig(
+            vectors=VectorsConfig(on_disk=True),
+            hnsw=HnswRuntimeConfig(
+                m=32,
+                ef_construct=200,
+                full_scan_threshold=5000,
+                max_indexing_threads=2,
+                on_disk=True,
+                payload_m=24,
+                inline_storage=False,
+            ),
+            optimizers=OptimizersRuntimeConfig(
+                indexing_threshold=10000,
+                memmap_threshold=20000,
+                deleted_threshold=0.2,
+                max_optimization_threads="auto",
+            ),
+            params=CollectionParamsConfig(
+                replication_factor=2,
+                write_consistency_factor=1,
+                on_disk_payload=True,
+            ),
+        )
+        assert node.quantization is not None
+        assert node.quantization.type == QuantizationType.SCALAR
+        assert node.quantization.always_ram is True
+
+    def test_alter_with_collection_blocks(self):
+        node = parse(
+            "ALTER COLLECTION articles "
+            "WITH VECTORS { on_disk: true } "
+            "WITH HNSW { full_scan_threshold: 1234 } "
+            "WITH OPTIMIZERS { indexing_threshold: 4567, prevent_unoptimized: true } "
+            "WITH PARAMS { on_disk_payload: false, read_fan_out_factor: 4 } "
+            "QUANTIZE DISABLED"
+        )
+        assert isinstance(node, AlterCollectionStmt)
+        assert node.config == CollectionConfig(
+            vectors=VectorsConfig(on_disk=True),
+            hnsw=HnswRuntimeConfig(full_scan_threshold=1234),
+            optimizers=OptimizersRuntimeConfig(
+                indexing_threshold=4567,
+                prevent_unoptimized=True,
+            ),
+            params=CollectionParamsConfig(
+                on_disk_payload=False,
+                read_fan_out_factor=4,
+            ),
+        )
+        assert node.quantization == QuantizationUpdate(disabled=True)
+
+    def test_create_hnsw_without_with_rejected(self):
+        with pytest.raises(QQLSyntaxError):
+            parse("CREATE COLLECTION articles HNSW { payload_m: 24 }")
+
+    def test_duplicate_collection_config_rejected(self):
+        with pytest.raises(QQLSyntaxError):
+            parse(
+                "CREATE COLLECTION articles "
+                "WITH HNSW { payload_m: 24 } "
+                "WITH HNSW { payload_m: 32 }"
+            )
+
+    def test_create_quantize_must_come_after_with_blocks(self):
+        with pytest.raises(QQLSyntaxError):
+            parse("CREATE COLLECTION articles QUANTIZE SCALAR WITH HNSW { payload_m: 24 }")
+
+    def test_create_rejects_alter_only_params(self):
+        with pytest.raises(QQLSyntaxError, match="supported only for ALTER COLLECTION"):
+            parse(
+                "CREATE COLLECTION articles "
+                "WITH PARAMS { read_fan_out_factor: 4 }"
+            )
 
 
 class TestHybridInsert:

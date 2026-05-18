@@ -22,6 +22,7 @@ from .parser import Parser
 _STMT_STARTERS = {
     TokenKind.INSERT,
     TokenKind.CREATE,
+    TokenKind.ALTER,
     TokenKind.DROP,
     TokenKind.SHOW,
     TokenKind.SELECT,
@@ -38,18 +39,45 @@ _DEPTH_CLOSE = {TokenKind.RBRACE, TokenKind.RBRACKET, TokenKind.RPAREN}
 
 
 def strip_comments(text: str) -> str:
-    """Remove ``-- ...`` to-end-of-line comments from every line.
+    """Remove ``-- ...`` comments while preserving string literals."""
+    out: list[str] = []
+    in_string = False
+    quote_char = ""
+    i = 0
+    n = len(text)
 
-    The check is byte-level: ``--`` inside a string literal would also be
-    stripped, but that edge case does not occur in practice for QQL scripts.
-    """
-    lines: list[str] = []
-    for line in text.splitlines():
-        idx = line.find("--")
-        if idx != -1:
-            line = line[:idx]
-        lines.append(line)
-    return "\n".join(lines)
+    while i < n:
+        ch = text[i]
+
+        if in_string:
+            out.append(ch)
+            if ch == "\\" and i + 1 < n:
+                out.append(text[i + 1])
+                i += 2
+                continue
+            if ch == quote_char:
+                in_string = False
+                quote_char = ""
+            i += 1
+            continue
+
+        if ch in ("'", '"'):
+            in_string = True
+            quote_char = ch
+            out.append(ch)
+            i += 1
+            continue
+
+        if ch == "-" and i + 1 < n and text[i + 1] == "-":
+            i += 2
+            while i < n and text[i] not in "\r\n":
+                i += 1
+            continue
+
+        out.append(ch)
+        i += 1
+
+    return "".join(out)
 
 
 def split_statements(tokens: list[Token]) -> list[list[Token]]:

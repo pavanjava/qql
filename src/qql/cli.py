@@ -38,11 +38,27 @@ Available statements:
       Create a new collection. Add HYBRID for dense+sparse BM25 vectors.
       Optional: [yellow]USING MODEL[/yellow] '<model>'
       Optional: [yellow]USING HYBRID[/yellow] [DENSE MODEL '<model>']
-      Optional: [yellow]HNSW[/yellow] { payload_m: <int> }
+      Optional: [yellow]WITH VECTORS[/yellow] { on_disk: <bool> }
+      Optional: [yellow]WITH HNSW[/yellow] { m, ef_construct, full_scan_threshold, max_indexing_threads, on_disk, payload_m, inline_storage }
+      Optional: [yellow]WITH OPTIMIZERS[/yellow] { deleted_threshold, vacuum_min_vector_number, default_segment_number, max_segment_size, memmap_threshold, indexing_threshold, flush_interval_sec, max_optimization_threads, prevent_unoptimized }
+      Optional: [yellow]WITH PARAMS[/yellow] { replication_factor, write_consistency_factor, on_disk_payload }
       Optional: [yellow]QUANTIZE SCALAR[/yellow] [QUANTILE <0.0–1.0>] [ALWAYS RAM]
       Optional: [yellow]QUANTIZE BINARY[/yellow] [ALWAYS RAM]
       Optional: [yellow]QUANTIZE PRODUCT[/yellow] [ALWAYS RAM]   (4× compression)
+      Optional: [yellow]QUANTIZE TURBO[/yellow] [BITS <1|1.5|2|4>] [ALWAYS RAM]
       QUANTIZE may be combined with any HYBRID or MODEL clause.
+
+  [yellow]ALTER COLLECTION[/yellow] <name>
+      Update runtime collection config without recreating the collection.
+      Optional: [yellow]WITH VECTORS[/yellow] { on_disk: <bool> }
+      Optional: [yellow]WITH HNSW[/yellow] { m, ef_construct, full_scan_threshold, max_indexing_threads, on_disk, payload_m, inline_storage }
+      Optional: [yellow]WITH OPTIMIZERS[/yellow] { deleted_threshold, vacuum_min_vector_number, default_segment_number, max_segment_size, memmap_threshold, indexing_threshold, flush_interval_sec, max_optimization_threads, prevent_unoptimized }
+      Optional: [yellow]WITH PARAMS[/yellow] { replication_factor, write_consistency_factor, read_fan_out_factor, read_fan_out_delay_ms, on_disk_payload }
+      Optional: [yellow]QUANTIZE SCALAR[/yellow] [QUANTILE <0.0–1.0>] [ALWAYS RAM]
+      Optional: [yellow]QUANTIZE BINARY[/yellow] [ALWAYS RAM]
+      Optional: [yellow]QUANTIZE PRODUCT[/yellow] [ALWAYS RAM]
+      Optional: [yellow]QUANTIZE TURBO[/yellow] [BITS <1|1.5|2|4>] [ALWAYS RAM]
+      Optional: [yellow]QUANTIZE DISABLED[/yellow]
 
   [yellow]DROP COLLECTION[/yellow] <name>
       Delete a collection and all its points.
@@ -400,7 +416,10 @@ def _format_collection_diagnostics(data: dict) -> str:
     vectors = data["vectors"]
     for vname, vconf in vectors.items():
         label = f"  Vector '{vname}'" if vname else "  Vector"
-        lines.append(f"{label}        : {vconf['size']} dims, {vconf['distance']} distance")
+        suffix = ""
+        if vconf.get("on_disk") is not None:
+            suffix = f", on_disk={vconf['on_disk']}"
+        lines.append(f"{label}        : {vconf['size']} dims, {vconf['distance']} distance{suffix}")
 
     # Sparse vectors
     if data["sparse_vectors"]:
@@ -421,6 +440,8 @@ def _format_collection_diagnostics(data: dict) -> str:
         lines.append(f"  HNSW on_disk         : {hnsw['on_disk']}")
     if hnsw.get("payload_m") is not None:
         lines.append(f"  HNSW payload_m       : {hnsw['payload_m']}")
+    if hnsw.get("inline_storage") is not None:
+        lines.append(f"  HNSW inline_storage  : {hnsw['inline_storage']}")
 
     # Payload schema
     schema = data["payload_schema"]
@@ -439,11 +460,21 @@ def _format_collection_diagnostics(data: dict) -> str:
     else:
         lines.append("  Payload indexes      : none")
 
+    sharding = data["sharding"]
+    if sharding.get("replication_factor") is not None:
+        lines.append(f"  Replication factor   : {sharding['replication_factor']}")
+    if sharding.get("write_consistency_factor") is not None:
+        lines.append(f"  Write consistency    : {sharding['write_consistency_factor']}")
+    if sharding.get("read_fan_out_factor") is not None:
+        lines.append(f"  Read fan-out         : {sharding['read_fan_out_factor']}")
+    if sharding.get("read_fan_out_delay_ms") is not None:
+        lines.append(f"  Read fan-out delay   : {sharding['read_fan_out_delay_ms']} ms")
+    if sharding.get("on_disk_payload") is not None:
+        lines.append(f"  Payload on_disk      : {sharding['on_disk_payload']}")
+
     # Sharding
     sh = data["sharding"]
     lines.append(f"  Shards               : {sh['shard_number']}")
-    lines.append(f"  Replicas             : {sh['replication_factor']}")
-    lines.append(f"  Write consistency    : {sh['write_consistency_factor']}")
 
     return "\n".join(lines)
 
