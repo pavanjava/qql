@@ -5,7 +5,13 @@ try:
 except PackageNotFoundError:
     __version__ = "0.0.0+unknown"
 
-from .config import DEFAULT_MODEL, QQLConfig, load_config
+from .config import (
+    DEFAULT_DENSE_VECTOR_NAME,
+    DEFAULT_MODEL,
+    DEFAULT_SPARSE_VECTOR_NAME,
+    QQLConfig,
+    load_config,
+)
 from .connection import Connection
 from .exceptions import QQLError, QQLRuntimeError, QQLSyntaxError
 from .executor import ExecutionResult, Executor
@@ -15,7 +21,9 @@ from .parser import Parser
 __all__ = [
     "__version__",
     "Connection",
+    "DEFAULT_DENSE_VECTOR_NAME",
     "DEFAULT_MODEL",
+    "DEFAULT_SPARSE_VECTOR_NAME",
     "QQLConfig",
     "QQLError",
     "QQLRuntimeError",

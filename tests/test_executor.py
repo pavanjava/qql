@@ -358,6 +358,24 @@ class TestCreate:
         kw = mock_client.update_collection.call_args.kwargs
         assert kw["vectors_config"]["dense"].on_disk is True
 
+    def test_alter_collection_vectors_rejects_multiple_dense_vectors(
+        self, executor, mock_client
+    ):
+        from qdrant_client.models import Distance, VectorParams
+
+        mock_client.collection_exists.return_value = True
+        mock_client.get_collection.return_value.config.params.vectors = {
+            "title": VectorParams(size=384, distance=Distance.COSINE),
+            "body": VectorParams(size=384, distance=Distance.COSINE),
+        }
+        mock_client.get_collection.return_value.config.params.sparse_vectors = None
+        node = AlterCollectionStmt(
+            collection="named_col",
+            config=CollectionConfig(vectors=VectorsConfig(on_disk=True)),
+        )
+        with pytest.raises(QQLRuntimeError, match="one dense vector"):
+            executor.execute(node)
+
     def test_alter_collection_can_disable_quantization(self, executor, mock_client):
         mock_client.collection_exists.return_value = True
         node = AlterCollectionStmt(
@@ -1644,6 +1662,18 @@ def _mock_hybrid_collection(
     }
 
 
+def _mock_unnamed_hybrid_collection(mock_client, sparse_name: str = "sparse"):
+    from qdrant_client.models import Distance, SparseVectorParams, VectorParams
+
+    mock_client.collection_exists.return_value = True
+    mock_client.get_collection.return_value.config.params.vectors = VectorParams(
+        size=384, distance=Distance.COSINE
+    )
+    mock_client.get_collection.return_value.config.params.sparse_vectors = {
+        sparse_name: SparseVectorParams()
+    }
+
+
 class TestHybridCreate:
     def test_create_hybrid_uses_named_vector_config(self, executor, mock_client):
         node = CreateCollectionStmt(collection="articles", hybrid=True)
@@ -1791,6 +1821,26 @@ class TestHybridInsert:
             collection="col", values={"author": "alice"}, model=None, hybrid=True
         )
         with pytest.raises(QQLRuntimeError, match="'text' field"):
+            executor.execute(node)
+
+    def test_hybrid_insert_rejects_unnamed_dense_collection(
+        self, executor, mock_client, mock_sparse_embedder
+    ):
+        _mock_unnamed_hybrid_collection(mock_client)
+        node = InsertStmt(
+            collection="col", values={"text": "hello"}, model=None, hybrid=True
+        )
+        with pytest.raises(QQLRuntimeError, match="named dense vectors"):
+            executor.execute(node)
+
+    def test_hybrid_bulk_insert_rejects_unnamed_dense_collection(
+        self, executor, mock_client, mock_sparse_embedder
+    ):
+        _mock_unnamed_hybrid_collection(mock_client)
+        node = InsertBulkStmt(
+            collection="col", values_list=({"text": "hello"},), model=None, hybrid=True
+        )
+        with pytest.raises(QQLRuntimeError, match="named dense vectors"):
             executor.execute(node)
 
 

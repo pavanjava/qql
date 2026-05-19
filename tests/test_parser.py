@@ -828,6 +828,16 @@ class TestHybridInsert:
         assert node.dense_vector == "emb"
         assert node.sparse_vector == "lex"
 
+    def test_insert_bulk_hybrid_vector_names(self):
+        node = parse(
+            "INSERT BULK INTO COLLECTION col VALUES [{'text': 'hi'}] "
+            "USING HYBRID DENSE VECTOR 'emb' SPARSE VECTOR 'lex'"
+        )
+        assert isinstance(node, InsertBulkStmt)
+        assert node.hybrid is True
+        assert node.dense_vector == "emb"
+        assert node.sparse_vector == "lex"
+
 
 class TestHybridSearch:
     def test_search_using_hybrid_sets_flag(self):

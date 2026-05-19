@@ -292,7 +292,12 @@ class Executor:
             sparse_name = node.sparse_vector or self._default_sparse_vector_name()
 
             if topology.exists:
-                dense_name = topology.dense_using(node.dense_vector) or dense_name
+                resolved_dense = topology.dense_using(node.dense_vector)
+                if resolved_dense is None:
+                    raise QQLRuntimeError(
+                        "Hybrid collections must use named dense vectors"
+                    )
+                dense_name = resolved_dense
                 sparse_name = topology.sparse_using(node.sparse_vector)
             else:
                 self._create_collection_and_wait(
@@ -377,7 +382,12 @@ class Executor:
             dense_name = node.dense_vector or self._default_dense_vector_name()
             sparse_name = node.sparse_vector or self._default_sparse_vector_name()
             if topology.exists:
-                dense_name = topology.dense_using(node.dense_vector) or dense_name
+                resolved_dense = topology.dense_using(node.dense_vector)
+                if resolved_dense is None:
+                    raise QQLRuntimeError(
+                        "Hybrid collections must use named dense vectors"
+                    )
+                dense_name = resolved_dense
                 sparse_name = topology.sparse_using(node.sparse_vector)
 
             first_dense_vector: list[float] | None = None
@@ -429,9 +439,12 @@ class Executor:
         model_name = node.model or self._config.default_model
         embedder = Embedder(model_name)
 
+        first_vector: list[float] | None = None
         points = []
         for vals in node.values_list:
             vector = embedder.embed(vals["text"])
+            if first_vector is None:
+                first_vector = vector
             point_id, payload = self._extract_point_id_and_payload(vals)
             point_vector = self._build_dense_point_vector(
                 topology, vector, node.dense_vector
@@ -440,8 +453,9 @@ class Executor:
                 PointStruct(id=point_id, vector=point_vector, payload=payload)
             )
 
+        assert first_vector is not None
         self._ensure_collection(
-            node.collection, len(vector), topology, node.dense_vector
+            node.collection, len(first_vector), topology, node.dense_vector
         )
 
         try:
@@ -1332,7 +1346,14 @@ class Executor:
     ) -> dict[str, VectorParamsDiff] | None:
         if config is None or config.vectors is None:
             return None
-        vector_name = topology.dense_config_key()
+        try:
+            vector_name = topology.dense_config_key()
+        except QQLRuntimeError as e:
+            if "multiple dense vectors" in str(e):
+                raise QQLRuntimeError(
+                    "ALTER COLLECTION WITH VECTORS requires a collection with one dense vector"
+                ) from e
+            raise
         return {
             vector_name: VectorParamsDiff(on_disk=config.vectors.on_disk),
         }

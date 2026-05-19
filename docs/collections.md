@@ -161,6 +161,8 @@ QQL supports the same config blocks on both `CREATE COLLECTION` and `ALTER COLLE
 - `WITH PARAMS { replication_factor, write_consistency_factor, read_fan_out_factor, read_fan_out_delay_ms, on_disk_payload }` on alter
 - `ALTER COLLECTION ... QUANTIZE ...` supports the same quantization forms as create, plus `QUANTIZE DISABLED`
 
+`ALTER COLLECTION ... WITH VECTORS { ... }` can update unnamed collections or named collections with one dense vector. Collections with multiple dense vectors are rejected because this syntax has no vector-name target.
+
 Example:
 
 ```sql
