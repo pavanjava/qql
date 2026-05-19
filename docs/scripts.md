@@ -120,7 +120,7 @@ Done. 41 point(s) written.
 --             configured model (see: qql connect).
 -- ============================================================
 
-CREATE COLLECTION medical_records HYBRID
+CREATE COLLECTION medical_records USING HYBRID DENSE VECTOR 'dense' SPARSE VECTOR 'sparse'
 
 -- Batch 1 / 1  (records 1–41)
 INSERT BULK INTO COLLECTION medical_records VALUES [
@@ -132,7 +132,7 @@ INSERT BULK INTO COLLECTION medical_records VALUES [
     'peer_reviewed': true
   },
   ...
-] USING HYBRID
+] USING HYBRID DENSE VECTOR 'dense' SPARSE VECTOR 'sparse'
 
 -- ============================================================
 -- End of dump

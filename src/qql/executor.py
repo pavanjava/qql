@@ -74,7 +74,6 @@ from .ast_nodes import (
     AlterCollectionStmt,
     AndExpr,
     BetweenExpr,
-    CollectionParamsConfig,
     CollectionConfig,
     CompareExpr,
     CreateCollectionStmt,
@@ -94,7 +93,6 @@ from .ast_nodes import (
     MatchTextExpr,
     NotExpr,
     NotInExpr,
-    OptimizersRuntimeConfig,
     OrExpr,
     QuantizationUpdate,
     QuantizationConfig,
@@ -108,8 +106,6 @@ from .ast_nodes import (
     ShowCollectionsStmt,
     UpdateVectorStmt,
     UpdatePayloadStmt,
-    VectorsConfig,
-    HnswRuntimeConfig,
 )
 from .config import QQLConfig
 from .embedder import CrossEncoderEmbedder, Embedder, SparseEmbedder
@@ -384,10 +380,13 @@ class Executor:
                 dense_name = topology.dense_using(node.dense_vector) or dense_name
                 sparse_name = topology.sparse_using(node.sparse_vector)
 
+            first_dense_vector: list[float] | None = None
             points: list[PointStruct] = []
             for vals in node.values_list:
                 point_id, payload = self._extract_point_id_and_payload(vals)
                 dense_vector = dense_embedder.embed(vals["text"])
+                if first_dense_vector is None:
+                    first_dense_vector = dense_vector
                 sparse_obj = sparse_embedder.embed(vals["text"])
                 sparse_vector = SparseVector(
                     indices=sparse_obj["indices"], values=sparse_obj["values"]
@@ -401,11 +400,11 @@ class Executor:
                 )
 
             if not topology.exists:
-                first_dense = dense_embedder.embed(node.values_list[0]["text"])
+                assert first_dense_vector is not None
                 self._create_collection_and_wait(
                     collection_name=node.collection,
                     vectors_config={
-                        dense_name: VectorParams(size=len(first_dense), distance=Distance.COSINE)
+                        dense_name: VectorParams(size=len(first_dense_vector), distance=Distance.COSINE)
                     },
                     sparse_vectors_config={
                         sparse_name: SparseVectorParams(modifier=Modifier.IDF)
@@ -557,7 +556,7 @@ class Executor:
         topology = self._resolve_topology(node.collection)
 
         update_kwargs: dict[str, Any] = {"collection_name": node.collection}
-        vectors_config = self._build_vectors_config_diff(node.collection, node.config)
+        vectors_config = self._build_vectors_config_diff(topology, node.config)
         hnsw_config = self._build_hnsw_config(node.config)
         optimizers_config = self._build_optimizers_config(node.config)
         collection_params = self._build_collection_params_diff(node.config)
@@ -1328,12 +1327,11 @@ class Executor:
 
     def _build_vectors_config_diff(
         self,
-        collection_name: str,
+        topology: CollectionTopology,
         config: CollectionConfig | None,
     ) -> dict[str, VectorParamsDiff] | None:
         if config is None or config.vectors is None:
             return None
-        topology = self._resolve_topology(collection_name)
         vector_name = topology.dense_config_key()
         return {
             vector_name: VectorParamsDiff(on_disk=config.vectors.on_disk),

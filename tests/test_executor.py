@@ -1936,6 +1936,28 @@ class TestHybridSearch:
         executor.execute(node)
         assert mock_client.query_points.call_args.kwargs["using"] == "body"
 
+    def test_dense_search_explicit_vector_unknown_name_raises(
+        self, executor, mock_client
+    ):
+        from qdrant_client.models import Distance, VectorParams
+
+        mock_client.collection_exists.return_value = True
+        mock_client.get_collection.return_value.config.params.vectors = {
+            "title": VectorParams(size=384, distance=Distance.COSINE),
+            "body": VectorParams(size=384, distance=Distance.COSINE),
+        }
+        mock_client.get_collection.return_value.config.params.sparse_vectors = None
+
+        node = SearchStmt(
+            collection="col",
+            query_text="q",
+            limit=5,
+            model=None,
+            dense_vector="missing_name",
+        )
+        with pytest.raises(QQLRuntimeError, match="no dense vector named"):
+            executor.execute(node)
+
     def test_hybrid_search_forwards_search_params_to_prefetch(
         self, executor, mock_client, mock_sparse_embedder, mocker
     ):
@@ -2922,11 +2944,12 @@ class TestUpdateVectorVectorShape:
     """Gaps 12 & 13 — verify exact vector shape sent to Qdrant for named/unnamed collections."""
 
     def test_update_vector_unnamed_collection_sends_plain_list(self, executor, mock_client):
+        from qdrant_client.models import Distance, VectorParams
         from qql.ast_nodes import UpdateVectorStmt
+
         mock_client.collection_exists.return_value = True
-        # Unnamed collection: get_collection returns non-dict vectors
         info = mock_client.get_collection.return_value
-        info.config.params.vectors = [None]  # list → not a dict → unnamed
+        info.config.params.vectors = VectorParams(size=3, distance=Distance.COSINE)
 
         node = UpdateVectorStmt(collection="articles", point_id=1, vector=(0.1, 0.2, 0.3))
         executor.execute(node)

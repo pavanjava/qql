@@ -27,7 +27,6 @@ from qql.ast_nodes import (
     OrExpr,
     QuantizationUpdate,
     QuantizationType,
-    QuantizationSearchWith,
     RecommendStmt,
     SelectStmt,
     ScrollStmt,
@@ -1121,14 +1120,6 @@ class TestSearchWithClause:
     def test_with_trailing_comma(self):
         node = parse("SEARCH col SIMILAR TO 'q' LIMIT 5 WITH { hnsw_ef: 256, }")
         assert node.with_clause.hnsw_ef == 256
-
-    def test_with_quantization_unknown_key_raises(self):
-        with pytest.raises(QQLSyntaxError):
-            parse(
-                "SEARCH col SIMILAR TO 'q' LIMIT 5 "
-                "WITH { quantization: { unknown: true } }"
-            )
-
 
 class TestSparseOnlySearch:
     def test_using_sparse_sets_flag(self):

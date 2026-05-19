@@ -110,7 +110,8 @@ Available statements:
   [yellow]DELETE FROM[/yellow] <name> [yellow]WHERE id =[/yellow] '<id>'
       Delete a point by its ID.
 
-  [yellow]UPDATE[/yellow] <name> [yellow]SET VECTOR[/yellow] ['<dense_vector>'] [yellow]WHERE id =[/yellow] '<id>'|<int> [<vector>]
+  [yellow]UPDATE[/yellow] <name> [yellow]SET VECTOR[/yellow] [yellow]WHERE id =[/yellow] '<id>'|<int> [<vector>]
+  [yellow]UPDATE[/yellow] <name> [yellow]SET VECTOR[/yellow] '<dense_vector_name>' [yellow]WHERE id =[/yellow] '<id>'|<int> [<vector>]
       Replace the dense vector for a single point by ID.
       The point must already exist. Vector is a float array: [0.1, 0.2, ..., 0.N]
 

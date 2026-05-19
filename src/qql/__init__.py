@@ -15,6 +15,7 @@ from .parser import Parser
 __all__ = [
     "__version__",
     "Connection",
+    "DEFAULT_MODEL",
     "QQLConfig",
     "QQLError",
     "QQLRuntimeError",
