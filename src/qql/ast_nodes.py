@@ -295,6 +295,9 @@ class SearchStmt:
     group_size: int = 3                     # max points per group (ignored when group_by is None)
     dense_vector: str | None = None
     sparse_vector: str | None = None
+    offset: int = 0                         # skip first N results
+    score_threshold: float | None = None    # drop results below this score
+    lookup_from: tuple[str, str | None] | None = None # cross-collection retrieval: (collection_name, vector_name)
 
 
 @dataclass(frozen=True)
@@ -305,10 +308,10 @@ class RecommendStmt:
     limit: int = 10
     strategy: str | None = None
     query_filter: FilterExpr | None = None
-    offset: int = 0
-    score_threshold: float | None = None
+    offset: int = 0                         # skip first N results
+    score_threshold: float | None = None    # drop results below this score
     with_clause: SearchWith | None = None
-    lookup_from: tuple[str, str | None] | None = None
+    lookup_from: tuple[str, str | None] | None = None # cross-collection retrieval: (collection_name, vector_name)
     using: str | None = None
 
 

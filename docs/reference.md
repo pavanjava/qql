@@ -33,6 +33,12 @@ Qdrant/bm25
 INSERT INTO docs VALUES {'text': 'hello'} USING MODEL 'BAAI/bge-small-en-v1.5'
 SEARCH docs SIMILAR TO 'hello' LIMIT 5 USING MODEL 'BAAI/bge-small-en-v1.5'
 
+-- Pagination and score filtering
+SEARCH docs SIMILAR TO 'hello' LIMIT 5 OFFSET 10 SCORE THRESHOLD 0.8
+
+-- Cross-collection retrieval
+SEARCH docs SIMILAR TO 'hello' LIMIT 5 LOOKUP FROM user_profiles VECTOR 'preferences'
+
 -- Explicit vector names
 INSERT INTO docs VALUES {'text': 'hello'} USING VECTOR 'body'
 SEARCH docs SIMILAR TO 'hello' LIMIT 5 USING VECTOR 'body'
@@ -172,7 +178,7 @@ Tests do not require a running Qdrant instance — the Qdrant client is mocked.
 pytest tests/ -v
 ```
 
-Expected output: **549 tests passing**.
+Expected output: **604 tests passing**.
 
 ---
 

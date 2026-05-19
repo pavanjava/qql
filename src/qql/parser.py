@@ -682,6 +682,31 @@ class Parser:
         self._expect(TokenKind.LIMIT)
         limit = int(self._expect(TokenKind.INTEGER).value)
 
+        offset: int = 0
+        if self._peek().kind == TokenKind.OFFSET:
+            self._advance()
+            offset_tok = self._peek()
+            offset = int(self._expect(TokenKind.INTEGER).value)
+            if offset < 0:
+                raise QQLSyntaxError("OFFSET must be a non-negative integer", offset_tok.pos)
+
+        score_threshold: float | None = None
+        if self._peek().kind == TokenKind.SCORE:
+            self._advance()
+            self._expect(TokenKind.THRESHOLD)
+            score_threshold = float(self._parse_number())
+
+        lookup_from: tuple[str, str | None] | None = None
+        if self._peek().kind == TokenKind.LOOKUP:
+            self._advance()
+            self._expect(TokenKind.FROM)
+            lookup_collection = self._parse_identifier()
+            lookup_vector: str | None = None
+            if self._peek().kind == TokenKind.VECTOR:
+                self._advance()
+                lookup_vector = self._expect(TokenKind.STRING).value
+            lookup_from = (lookup_collection, lookup_vector)
+
         with_clause: SearchWith | None = None
         if self._peek().kind == TokenKind.EXACT:
             self._advance()
@@ -757,6 +782,7 @@ class Parser:
             if self._peek().kind == TokenKind.MODEL:
                 self._advance()  # consume MODEL
                 rerank_model = self._expect(TokenKind.STRING).value
+        
         if self._peek().kind == TokenKind.EXACT:
             self._advance()
             if with_clause is None:
@@ -771,6 +797,7 @@ class Parser:
                     mmr_diversity=with_clause.mmr_diversity,
                     mmr_candidates=with_clause.mmr_candidates,
                 )
+            
         if self._peek().kind == TokenKind.WITH:
             self._advance()  # consume WITH
             parsed_with = self._parse_with_clause()
@@ -793,6 +820,8 @@ class Parser:
         group_by: str | None = None
         group_size: int = 3
         if self._peek().kind == TokenKind.GROUP:
+            if offset > 0:
+                raise QQLSyntaxError("OFFSET cannot be used with GROUP BY", self._peek().pos)
             self._advance()  # consume GROUP
             self._expect(TokenKind.BY)
             group_by = self._parse_field_path()
@@ -827,6 +856,9 @@ class Parser:
             group_size=group_size,
             dense_vector=dense_vector,
             sparse_vector=sparse_vector,
+            offset=offset,
+            score_threshold=score_threshold,
+            lookup_from=lookup_from,
         )
 
     def _parse_recommend(self) -> RecommendStmt:
@@ -870,13 +902,16 @@ class Parser:
         offset: int = 0
         if self._peek().kind == TokenKind.OFFSET:
             self._advance()
+            offset_tok = self._peek()
             offset = int(self._expect(TokenKind.INTEGER).value)
+            if offset < 0:
+                raise QQLSyntaxError("OFFSET must be a non-negative integer", offset_tok.pos)
 
         score_threshold: float | None = None
         if self._peek().kind == TokenKind.SCORE:
             self._advance()
             self._expect(TokenKind.THRESHOLD)
-            score_threshold = float(self._expect(TokenKind.FLOAT).value)
+            score_threshold = float(self._parse_number())
 
         query_filter: FilterExpr | None = None
         if self._peek().kind == TokenKind.WHERE:

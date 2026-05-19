@@ -27,7 +27,7 @@ print(result.data)      # {"id": "<uuid>", "collection": "notes"}
 
 # Search
 result = conn.run_query(
-    "SEARCH notes SIMILAR TO 'hello' LIMIT 5 WHERE year >= 2023"
+    "SEARCH notes SIMILAR TO 'hello' LIMIT 5 SCORE THRESHOLD 0.8 WHERE year >= 2023"
 )
 for hit in result.data:
     print(hit["score"], hit["payload"])
@@ -124,7 +124,7 @@ with Connection("http://localhost:6333") as conn:
 
     # Recommend similar points
     result = conn.run_query(
-        "RECOMMEND FROM notes POSITIVE IDS (1, 2) NEGATIVE IDS (3) LIMIT 5"
+        "RECOMMEND FROM notes POSITIVE IDS (1, 2) NEGATIVE IDS (3) LIMIT 5 SCORE THRESHOLD 0.6"
     )
     for hit in result.data:
         print(hit["score"], hit["payload"])

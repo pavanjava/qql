@@ -846,6 +846,13 @@ class Executor:
         # enough material to reorder; only `node.limit` results are returned.
         fetch_limit = node.limit * _RERANK_FETCH_MULTIPLIER if node.rerank else node.limit
 
+        lookup_from: LookupLocation | None = None
+        if node.lookup_from is not None:
+            lookup_from = LookupLocation(
+                collection=node.lookup_from[0],
+                vector=node.lookup_from[1],
+            )
+
         # ── GROUP BY SEARCH: delegate to query_points_groups() ─────────────
         if node.group_by is not None:
             return self._execute_search_groups(
@@ -879,7 +886,10 @@ class Executor:
                     ],
                     query=FusionQuery(fusion=self._resolve_hybrid_fusion(node.fusion)),
                     limit=fetch_limit,
+                    offset=node.offset or None,
                     query_filter=qdrant_filter,
+                    score_threshold=node.score_threshold,
+                    lookup_from=lookup_from,
                 )
             except UnexpectedResponse as e:
                 raise QQLRuntimeError(f"Qdrant error during SEARCH: {e}") from e
@@ -919,8 +929,11 @@ class Executor:
                     query=sparse_vector,
                     using=topology.sparse_using(node.sparse_vector),
                     limit=fetch_limit,
+                    offset=node.offset or None,
                     query_filter=qdrant_filter,
                     search_params=search_params,
+                    score_threshold=node.score_threshold,
+                    lookup_from=lookup_from,
                 )
             except UnexpectedResponse as e:
                 raise QQLRuntimeError(f"Qdrant error during SEARCH: {e}") from e
@@ -956,8 +969,11 @@ class Executor:
                 query=self._build_dense_query(vector, node.with_clause),
                 using=query_using,
                 limit=fetch_limit,
+                offset=node.offset or None,
                 query_filter=qdrant_filter,
                 search_params=search_params,
+                score_threshold=node.score_threshold,
+                lookup_from=lookup_from,
             )
         except UnexpectedResponse as e:
             raise QQLRuntimeError(f"Qdrant error during SEARCH: {e}") from e
@@ -1599,6 +1615,14 @@ class Executor:
         topology: CollectionTopology,
     ) -> ExecutionResult:
         """Execute SEARCH ... GROUP BY using query_points_groups()."""
+        
+        lookup_from: LookupLocation | None = None
+        if node.lookup_from is not None:
+            lookup_from = LookupLocation(
+                collection=node.lookup_from[0],
+                vector=node.lookup_from[1],
+            )
+            
         try:
             if node.hybrid:
                 dense_model = node.model or self._config.default_model
@@ -1627,6 +1651,8 @@ class Executor:
                     limit=node.limit,
                     group_size=node.group_size,
                     query_filter=qdrant_filter,
+                    score_threshold=node.score_threshold,
+                    lookup_from=lookup_from,
                 )
                 label = "hybrid, grouped"
             elif node.sparse_only:
@@ -1645,6 +1671,8 @@ class Executor:
                     group_size=node.group_size,
                     query_filter=qdrant_filter,
                     search_params=search_params,
+                    score_threshold=node.score_threshold,
+                    lookup_from=lookup_from,
                 )
                 label = "sparse, grouped"
             else:
@@ -1660,6 +1688,8 @@ class Executor:
                     group_size=node.group_size,
                     query_filter=qdrant_filter,
                     search_params=search_params,
+                    score_threshold=node.score_threshold,
+                    lookup_from=lookup_from,
                 )
                 label = "grouped"
         except UnexpectedResponse as e:

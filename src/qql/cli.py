@@ -88,6 +88,9 @@ Available statements:
 
   [yellow]SEARCH[/yellow] <name> [yellow]SIMILAR TO[/yellow] '<text>' [yellow]LIMIT[/yellow] <n>
       Semantic search by vector similarity.
+      Optional: [yellow]OFFSET[/yellow] <n>
+      Optional: [yellow]SCORE THRESHOLD[/yellow] <float|int>
+      Optional: [yellow]LOOKUP FROM[/yellow] <collection> [[yellow]VECTOR[/yellow] '<vector_name>']
       Optional: [yellow]USING MODEL[/yellow] '<model>'
       Optional: [yellow]USING VECTOR[/yellow] '<dense_vector>'
       Optional: [yellow]USING HYBRID[/yellow] [FUSION 'rrf|dbsf'] [DENSE MODEL '<model>'] [DENSE VECTOR '<name>'] [SPARSE MODEL '<model>'] [SPARSE VECTOR '<name>']
@@ -99,13 +102,19 @@ Available statements:
       Optional: [yellow]GROUP BY[/yellow] <field> [[yellow]GROUP_SIZE[/yellow] <n>]
                   Group results by a payload field value (default GROUP_SIZE: 3).
                   Field must be keyword or integer type. RERANK and GROUP BY cannot be combined.
+                  OFFSET is not supported with GROUP BY.
 
   [yellow]RECOMMEND FROM[/yellow] <name> [yellow]POSITIVE IDS[/yellow] (<id>, ...)
       Find points similar to known examples.
       Optional: [yellow]NEGATIVE IDS[/yellow] (<id>, ...)
       Optional: [yellow]STRATEGY[/yellow] 'average_vector|best_score|sum_scores'
-      Optional: [yellow]WHERE[/yellow] <filter>
+      Optional: [yellow]LOOKUP FROM[/yellow] <collection> [[yellow]VECTOR[/yellow] '<vector_name>']
+      Optional: [yellow]USING[/yellow] '<vector_name>'
       Requires: [yellow]LIMIT[/yellow] <n>
+      Optional: [yellow]OFFSET[/yellow] <n>
+      Optional: [yellow]SCORE THRESHOLD[/yellow] <float|int>
+      Optional: [yellow]WHERE[/yellow] <filter>
+      Optional: [yellow]WITH[/yellow] { hnsw_ef: <int>, exact: <bool>, acorn: <bool>, indexed_only: <bool>, quantization: { ignore: <bool>, rescore: <bool>, oversampling: <n> } }
 
   [yellow]DELETE FROM[/yellow] <name> [yellow]WHERE id =[/yellow] '<id>'
       Delete a point by its ID.

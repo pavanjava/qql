@@ -265,6 +265,34 @@ class TestSearch:
         node = parse("SEARCH notes SIMILAR TO 'hi' LIMIT 3 USING MODEL 'my-model'")
         assert node.model == "my-model"
 
+    def test_search_with_offset_score_lookup(self):
+        node = parse(
+            "SEARCH notes SIMILAR TO 'hi' LIMIT 5 OFFSET 10 SCORE THRESHOLD 0.8 LOOKUP FROM other_coll"
+        )
+        assert node.offset == 10
+        assert node.score_threshold == 0.8
+        assert node.lookup_from == ("other_coll", None)
+
+    def test_search_with_integer_score_threshold(self):
+        node = parse(
+            "SEARCH notes SIMILAR TO 'hi' LIMIT 5 SCORE THRESHOLD 1"
+        )
+        assert node.score_threshold == pytest.approx(1.0)
+
+    def test_search_with_negative_offset_raises(self):
+        with pytest.raises(QQLSyntaxError, match="must be a non-negative integer"):
+            parse("SEARCH notes SIMILAR TO 'hi' LIMIT 5 OFFSET -1")
+
+    def test_search_group_by_with_offset_raises(self):
+        with pytest.raises(QQLSyntaxError, match="OFFSET cannot be used with GROUP BY"):
+            parse("SEARCH notes SIMILAR TO 'hi' LIMIT 5 OFFSET 10 GROUP BY author")
+
+    def test_search_with_lookup_vector(self):
+        node = parse(
+            "SEARCH notes SIMILAR TO 'hi' LIMIT 5 LOOKUP FROM other_coll VECTOR 'my_vec'"
+        )
+        assert node.lookup_from == ("other_coll", "my_vec")
+
 
 class TestDelete:
     def test_delete_by_string_id(self):
@@ -323,11 +351,21 @@ class TestRecommend:
         node = parse("RECOMMEND FROM notes POSITIVE IDS ('a') LIMIT 10 OFFSET 5")
         assert node.offset == 5
 
+    def test_recommend_with_negative_offset_raises(self):
+        with pytest.raises(QQLSyntaxError, match="must be a non-negative integer"):
+            parse("RECOMMEND FROM notes POSITIVE IDS ('a') LIMIT 10 OFFSET -1")
+
     def test_recommend_with_score_threshold(self):
         node = parse(
             "RECOMMEND FROM notes POSITIVE IDS ('a') LIMIT 10 SCORE THRESHOLD 0.5"
         )
         assert node.score_threshold == pytest.approx(0.5)
+
+    def test_recommend_with_integer_score_threshold(self):
+        node = parse(
+            "RECOMMEND FROM notes POSITIVE IDS ('a') LIMIT 10 SCORE THRESHOLD 1"
+        )
+        assert node.score_threshold == pytest.approx(1.0)
 
     def test_recommend_with_clause(self):
         node = parse(

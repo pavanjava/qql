@@ -974,6 +974,136 @@ class TestSearch:
         mock_client.query_points.assert_called_once()
         assert result.success is True
 
+    def test_search_forwards_offset_score_lookup(self, executor, mock_client, mocker):
+        mock_client.collection_exists.return_value = True
+        mock_response = mocker.MagicMock()
+        mock_response.points = []
+        mock_client.query_points.return_value = mock_response
+
+        node = SearchStmt(
+            collection="notes",
+            query_text="hello",
+            limit=5,
+            model=None,
+            offset=10,
+            score_threshold=0.8,
+            lookup_from=("other_coll", "vec_name")
+        )
+        executor.execute(node)
+
+        kwargs = mock_client.query_points.call_args.kwargs
+        assert kwargs["offset"] == 10
+        assert kwargs["score_threshold"] == 0.8
+        assert kwargs["lookup_from"].collection == "other_coll"
+        assert kwargs["lookup_from"].vector == "vec_name"
+
+    def test_search_forwards_offset_score_lookup_hybrid(self, executor, mock_client, mocker):
+        mocker.patch("qql.executor.Embedder", return_value=mocker.MagicMock())
+        mocker.patch("qql.executor.SparseEmbedder", return_value=mocker.MagicMock())
+        mock_client.collection_exists.return_value = True
+        
+        collection_info = mocker.MagicMock()
+        collection_info.config.params.vectors = {"dense": {}}
+        collection_info.config.params.sparse_vectors = {"sparse": {}}
+        mock_client.get_collection.return_value = collection_info
+        
+        mock_response = mocker.MagicMock()
+        mock_response.points = []
+        mock_client.query_points.return_value = mock_response
+
+        node = SearchStmt(
+            collection="notes",
+            query_text="hello",
+            limit=5,
+            model=None,
+            hybrid=True,
+            offset=10,
+            score_threshold=0.8,
+            lookup_from=("other_coll", None)
+        )
+        executor.execute(node)
+
+        kwargs = mock_client.query_points.call_args.kwargs
+        assert kwargs["offset"] == 10
+        assert kwargs["score_threshold"] == 0.8
+        assert kwargs["lookup_from"].collection == "other_coll"
+        assert kwargs["lookup_from"].vector is None
+
+    def test_search_forwards_offset_score_lookup_sparse(self, executor, mock_client, mocker):
+        mocker.patch("qql.executor.SparseEmbedder", return_value=mocker.MagicMock())
+        mock_client.collection_exists.return_value = True
+        
+        collection_info = mocker.MagicMock()
+        collection_info.config.params.vectors = None
+        collection_info.config.params.sparse_vectors = {"sparse": {}}
+        mock_client.get_collection.return_value = collection_info
+        
+        mock_response = mocker.MagicMock()
+        mock_response.points = []
+        mock_client.query_points.return_value = mock_response
+
+        node = SearchStmt(
+            collection="notes",
+            query_text="hello",
+            limit=5,
+            model=None,
+            sparse_only=True,
+            offset=5,
+            score_threshold=0.5,
+            lookup_from=("other", "vec")
+        )
+        executor.execute(node)
+
+        kwargs = mock_client.query_points.call_args.kwargs
+        assert kwargs["offset"] == 5
+        assert kwargs["score_threshold"] == 0.5
+        assert kwargs["lookup_from"].collection == "other"
+        assert kwargs["lookup_from"].vector == "vec"
+
+    def test_search_groups_forwards_score_lookup(self, executor, mock_client, mocker):
+        mocker.patch("qql.executor.Embedder", return_value=mocker.MagicMock())
+        mock_client.collection_exists.return_value = True
+        mock_response = mocker.MagicMock()
+        mock_response.groups = []
+        mock_client.query_points_groups.return_value = mock_response
+
+        node = SearchStmt(
+            collection="notes",
+            query_text="hello",
+            limit=5,
+            model=None,
+            group_by="author",
+            group_size=2,
+            offset=0,
+            score_threshold=0.7,
+            lookup_from=("other_coll", "vec_name")
+        )
+        executor.execute(node)
+
+        kwargs = mock_client.query_points_groups.call_args.kwargs
+        assert "offset" not in kwargs
+        assert kwargs["score_threshold"] == 0.7
+        assert kwargs["lookup_from"].collection == "other_coll"
+        assert kwargs["lookup_from"].vector == "vec_name"
+
+    def test_search_forwards_offset_0_as_none(self, executor, mock_client, mocker):
+        mock_client.collection_exists.return_value = True
+        mock_response = mocker.MagicMock()
+        mock_response.points = []
+        mock_client.query_points.return_value = mock_response
+
+        node = SearchStmt(
+            collection="notes",
+            query_text="hello",
+            limit=5,
+            model=None,
+            offset=0
+        )
+        executor.execute(node)
+
+        kwargs = mock_client.query_points.call_args.kwargs
+        assert kwargs["offset"] is None
+
     def test_search_nonexistent_collection_raises(self, executor, mock_client):
         mock_client.collection_exists.return_value = False
         node = SearchStmt(collection="ghost", query_text="hi", limit=3, model=None)
@@ -1250,6 +1380,18 @@ class TestRecommend:
         )
         executor.execute(node)
         assert mock_client.query_points.call_args.kwargs["offset"] == 10
+
+    def test_recommend_forwards_offset_0_as_none(self, executor, mock_client, mocker):
+        mock_client.collection_exists.return_value = True
+        mock_response = mocker.MagicMock()
+        mock_response.points = []
+        mock_client.query_points.return_value = mock_response
+
+        node = RecommendStmt(
+            collection="notes", positive_ids=("a",), limit=5, offset=0
+        )
+        executor.execute(node)
+        assert mock_client.query_points.call_args.kwargs["offset"] is None
 
     def test_recommend_forwards_score_threshold(self, executor, mock_client, mocker):
         mock_client.collection_exists.return_value = True

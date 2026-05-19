@@ -10,7 +10,7 @@ An optional `WHERE` clause filters the candidate set **before** similarity ranki
 
 **Syntax:**
 ```
-SEARCH <collection_name> SIMILAR TO '<query_text>' LIMIT <n>
+SEARCH <collection_name> SIMILAR TO '<query_text>' LIMIT <n> [OFFSET <n>] [SCORE THRESHOLD <f>] [LOOKUP FROM <collection> [VECTOR '<name>']]
 SEARCH <collection_name> SIMILAR TO '<query_text>' LIMIT <n> USING MODEL '<model_name>'
 SEARCH <collection_name> SIMILAR TO '<query_text>' LIMIT <n> USING VECTOR '<dense_vector_name>'
 SEARCH <collection_name> SIMILAR TO '<query_text>' LIMIT <n> [USING MODEL '<model>'] WHERE <filter>
@@ -27,6 +27,21 @@ SEARCH <collection_name> SIMILAR TO '<query_text>' LIMIT <n> [USING ...] [WHERE 
 Basic search, return top 5 results:
 ```sql
 SEARCH articles SIMILAR TO 'machine learning algorithms' LIMIT 5
+```
+
+Pagination with OFFSET:
+```sql
+SEARCH articles SIMILAR TO 'machine learning' LIMIT 10 OFFSET 20
+```
+
+Filter low-quality matches with SCORE THRESHOLD:
+```sql
+SEARCH articles SIMILAR TO 'deep learning' LIMIT 10 SCORE THRESHOLD 0.8
+```
+
+Cross-collection vector lookup:
+```sql
+SEARCH articles SIMILAR TO 'deep learning' LIMIT 5 LOOKUP FROM user_profiles VECTOR 'preferences'
 ```
 
 Search only papers published after 2020:
@@ -70,6 +85,10 @@ Search with native MMR diversification:
 ```sql
 SEARCH articles SIMILAR TO 'attention mechanism' LIMIT 10 WITH { mmr_diversity: 0.5, mmr_candidates: 50 }
 ```
+
+**Clause Order:**
+`SEARCH` requires clauses to appear in this strict order if used:
+`LIMIT` → `OFFSET` → `SCORE THRESHOLD` → `LOOKUP FROM` → `USING ...` → `WHERE` → `RERANK` → `WITH` → `GROUP BY`
 
 **Output:**
 
@@ -394,6 +413,7 @@ SEARCH <collection> SIMILAR TO '<query>' LIMIT <n> USING HYBRID GROUP BY <field>
 - **`GROUP_SIZE <m>`** — maximum number of points per group (default: **3**).
 - **`GROUP BY <field>`** — the payload field whose values define the groups. **Must be a string (keyword) or number (integer) field** — this is enforced by Qdrant. Dot-notation is supported (e.g. `meta.author`). Array-valued fields are allowed: a point with multiple values for the field can appear in multiple groups. The field should be indexed as `keyword` or `integer` for best performance (see [CREATE INDEX](collections.md)).
 - `WHERE` filters, `USING HYBRID`, and `USING MODEL` are all compatible with GROUP BY.
+- ⚠️ **Incompatibility:** `GROUP BY` is not compatible with `OFFSET` or `RERANK`. Use cursors (not currently supported in QQL) for paginating grouped results in Qdrant.
 - **`GROUP BY` and `RERANK` cannot be combined** in the same statement — this raises a syntax error.
 
 **Examples:**
