@@ -1242,18 +1242,39 @@ class TestSearch:
         assert query.mmr.diversity == pytest.approx(0.4)
         assert query.mmr.candidates_limit == 25
 
-    def test_hybrid_search_with_mmr_raises(self, executor, mock_client):
+    def test_hybrid_search_with_mmr_uses_nearest_query_in_prefetch(self, executor, mock_client, mocker):
+        from qdrant_client.models import NearestQuery
+
+        mocker.patch("qql.executor.Embedder", return_value=mocker.MagicMock())
+        mocker.patch("qql.executor.SparseEmbedder", return_value=mocker.MagicMock())
         mock_client.collection_exists.return_value = True
+
+        collection_info = mocker.MagicMock()
+        collection_info.config.params.vectors = {"dense": {}}
+        collection_info.config.params.sparse_vectors = {"sparse": {}}
+        mock_client.get_collection.return_value = collection_info
+
+        mock_response = mocker.MagicMock()
+        mock_response.points = []
+        mock_client.query_points.return_value = mock_response
+
         node = SearchStmt(
             collection="notes",
             query_text="hello",
             limit=5,
             model=None,
             hybrid=True,
-            with_clause=SearchWith(mmr_diversity=0.5),
+            with_clause=SearchWith(mmr_diversity=0.5, mmr_candidates=30),
         )
-        with pytest.raises(QQLRuntimeError, match="MMR is not supported with USING HYBRID yet"):
-            executor.execute(node)
+        executor.execute(node)
+
+        prefetch = mock_client.query_points.call_args.kwargs["prefetch"]
+        assert prefetch is not None
+        dense_query = prefetch[0].query
+        assert isinstance(dense_query, NearestQuery)
+        assert dense_query.mmr is not None
+        assert dense_query.mmr.diversity == pytest.approx(0.5)
+        assert dense_query.mmr.candidates_limit == 30
 
     def test_sparse_search_with_mmr_raises(self, executor, mock_client):
         mock_client.collection_exists.return_value = True

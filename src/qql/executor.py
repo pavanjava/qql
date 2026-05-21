@@ -872,7 +872,7 @@ class Executor:
                     collection_name=node.collection,
                     prefetch=[
                         Prefetch(
-                            query=dense_vector,
+                            query=self._build_dense_query(dense_vector, node.with_clause),
                             using=topology.dense_using(node.dense_vector),
                             limit=node.limit * _HYBRID_PREFETCH_MULTIPLIER,
                             params=search_params,
@@ -1460,8 +1460,6 @@ class Executor:
     def _validate_search_mmr_usage(self, node: SearchStmt) -> None:
         if not self._has_mmr(node.with_clause):
             return
-        if node.hybrid:
-            raise QQLRuntimeError("MMR is not supported with USING HYBRID yet")
         if node.sparse_only:
             raise QQLRuntimeError("MMR is not supported with USING SPARSE yet")
 
@@ -1635,7 +1633,7 @@ class Executor:
                     group_by=node.group_by,
                     prefetch=[
                         Prefetch(
-                            query=dense_vector,
+                            query=self._build_dense_query(dense_vector, node.with_clause),
                             using=topology.dense_using(node.dense_vector),
                             limit=node.limit * _HYBRID_PREFETCH_MULTIPLIER,
                             params=search_params,
