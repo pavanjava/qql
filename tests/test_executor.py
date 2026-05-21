@@ -1270,7 +1270,40 @@ class TestSearch:
 
         prefetch = mock_client.query_points.call_args.kwargs["prefetch"]
         assert prefetch is not None
-        dense_query = prefetch[0].query
+        dense_prefetch = next(p for p in prefetch if p.using == "dense")
+        dense_query = dense_prefetch.query
+        assert isinstance(dense_query, NearestQuery)
+        assert dense_query.mmr is not None
+        assert dense_query.mmr.diversity == pytest.approx(0.5)
+        assert dense_query.mmr.candidates_limit == 30
+
+    def test_hybrid_search_with_mmr_grouped_uses_nearest_query_in_prefetch(self, executor, mock_client, mocker):
+        from qdrant_client.models import NearestQuery
+
+        _mock_hybrid_collection(mock_client)
+        mock_response = mocker.MagicMock()
+        mock_response.groups = []
+        mock_client.query_points_groups.return_value = mock_response
+
+        mock_sparse_embedder = mocker.MagicMock()
+        mock_sparse_embedder.query_embed.return_value = {"indices": [0, 1], "values": [0.5, 0.5]}
+        mocker.patch("qql.executor.SparseEmbedder", return_value=mock_sparse_embedder)
+
+        node = SearchStmt(
+            collection="articles",
+            query_text="hello",
+            limit=5,
+            model=None,
+            hybrid=True,
+            group_by="category",
+            with_clause=SearchWith(mmr_diversity=0.5, mmr_candidates=30),
+        )
+        executor.execute(node)
+
+        prefetch = mock_client.query_points_groups.call_args.kwargs["prefetch"]
+        assert prefetch is not None
+        dense_prefetch = next(p for p in prefetch if p.using == "dense")
+        dense_query = dense_prefetch.query
         assert isinstance(dense_query, NearestQuery)
         assert dense_query.mmr is not None
         assert dense_query.mmr.diversity == pytest.approx(0.5)
