@@ -61,14 +61,26 @@
         btn.addEventListener('click', () => {
           const code = pre.querySelector('code');
           const text = code ? code.innerText : pre.innerText;
-          navigator.clipboard.writeText(text).then(() => {
+
+          const markCopied = () => {
             btn.textContent = 'Copied!';
             btn.classList.add('copied');
             setTimeout(() => {
               btn.textContent = 'Copy';
               btn.classList.remove('copied');
             }, 2000);
-          }).catch(() => {
+          };
+
+          const markFailed = () => {
+            btn.textContent = 'Copy failed';
+            btn.classList.add('copy-error');
+            setTimeout(() => {
+              btn.textContent = 'Copy';
+              btn.classList.remove('copy-error');
+            }, 2000);
+          };
+
+          const fallbackCopy = () => {
             const ta = document.createElement('textarea');
             ta.value = text;
             ta.style.position = 'fixed';
@@ -76,23 +88,21 @@
             document.body.appendChild(ta);
             ta.select();
             try {
-              document.execCommand('copy');
-              btn.textContent = 'Copied!';
-              btn.classList.add('copied');
-              setTimeout(() => {
-                btn.textContent = 'Copy';
-                btn.classList.remove('copied');
-              }, 2000);
+              const copied = document.execCommand('copy');
+              if (copied) markCopied();
+              else markFailed();
             } catch (e) {
-              btn.textContent = 'Copy failed';
-              btn.classList.add('copy-error');
-              setTimeout(() => {
-                btn.textContent = 'Copy';
-                btn.classList.remove('copy-error');
-              }, 2000);
+              markFailed();
+            } finally {
+              document.body.removeChild(ta);
             }
-            document.body.removeChild(ta);
-          });
+          };
+
+          if (navigator.clipboard?.writeText) {
+            navigator.clipboard.writeText(text).then(markCopied).catch(fallbackCopy);
+          } else {
+            fallbackCopy();
+          }
         });
         
         wrapper.appendChild(btn);
