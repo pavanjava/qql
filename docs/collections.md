@@ -5,6 +5,8 @@ title: "Collections & Quantization"
 
 # Managing Collections
 
+Create, list, inspect, configure, and delete Qdrant collections with optional quantization for memory optimization.
+
 ---
 
 ## SHOW COLLECTIONS — list collections

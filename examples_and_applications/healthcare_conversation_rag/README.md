@@ -23,7 +23,7 @@ This application loads a dataset of doctor-patient conversations into Qdrant and
 # Install dependencies
 pip install -e ../..  # install qql from the repo root
 
-# Or install from pyproject.toml
+# Or install from PyPI
 pip install qql-cli datasets agno ollama openai
 ```
 
@@ -74,7 +74,7 @@ python main.py
 
 The agent will launch and you can ask medical questions in natural language. For example:
 
-```
+```text
 hi doctor I am just wondering what does abutment of the nerve root mean in a back issue please explain what treatment is required for annular bulging and tear
 ```
 
@@ -82,7 +82,7 @@ The agent will call `search_medical_records` to retrieve relevant conversation c
 
 ## Project Structure
 
-```
+```text
 healthcare_conversation_rag/
 ├── main.py              # AI agent with search tool
 ├── create_dataset.py    # Generates .qql file from HuggingFace dataset
@@ -119,7 +119,7 @@ healthcare_conversation_rag/
 **Adjust search params** — modify the `WITH { ... }` block in `main.py:search_medical_records()`:
 
 ```python
-query = f"SEARCH medical_records SIMILAR TO '{question}' LIMIT {LIMIT} WITH {{ hnsw_ef: 128, mmr_diversity: 0.5, mmr_candidates: 50}}"
+query = f"SEARCH doctor_patient_conversation SIMILAR TO '{question}' LIMIT {LIMIT} WITH {{ hnsw_ef: 128, mmr_diversity: 0.5, mmr_candidates: 50}}"
 ```
 
 **Use a different model** — change the `Ollama(id=...)` in `main.py`.

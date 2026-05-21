@@ -110,21 +110,36 @@ body {
 .main-content {
   flex: 1;
   margin-left: 260px;
-  padding: 40px 48px;
-  max-width: 1000px;
+  padding: 48px 48px 40px;
+  min-width: 0;
+  max-width: 1440px;
 }
 
 .content-wrapper {
-  max-width: 800px;
+  max-width: 1200px;
 }
 
 .content-wrapper h1 {
-  font-size: 2.5rem;
+  font-size: 2.8rem;
   color: #f0f6fc;
   margin-top: 0;
-  margin-bottom: 24px;
+  margin-bottom: 16px;
   border-bottom: 1px solid #21262d;
-  padding-bottom: 12px;
+  padding-bottom: 16px;
+}
+
+.content-wrapper h1 + p {
+  font-size: 1.15rem;
+  color: #8b949e;
+  margin-top: 0;
+  margin-bottom: 8px;
+}
+
+.content-wrapper h1 + p + hr {
+  margin-top: 20px;
+  margin-bottom: 32px;
+  border: none;
+  border-top: 1px solid #21262d;
 }
 
 .content-wrapper h2 {
@@ -164,12 +179,12 @@ body {
 }
 
 .content-wrapper pre {
-  background: #010409;
+  background: #161b22;
   border: 1px solid #30363d;
   border-radius: 8px;
-  padding: 16px;
+  padding: 20px;
   overflow-x: auto;
-  font-size: 0.9rem;
+  font-size: 0.85rem;
   line-height: 1.5;
   margin: 0;
 }
@@ -191,7 +206,9 @@ body {
   transition: opacity 0.2s, background 0.2s, color 0.2s, border-color 0.2s;
 }
 
-.code-wrapper:hover .copy-btn {
+.code-wrapper:hover .copy-btn,
+.code-wrapper:focus-within .copy-btn,
+.copy-btn:focus {
   opacity: 1;
 }
 
@@ -208,7 +225,7 @@ body {
 }
 
 .content-wrapper code {
-  font-family: ui-monospace, SFMono-Regular, SF Mono, Menlo, Consolas, Liberation Mono, monospace;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
   background: #161b22;
   padding: 0.2em 0.4em;
   border-radius: 6px;

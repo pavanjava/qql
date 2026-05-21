@@ -5,6 +5,8 @@ title: "Reference"
 
 # Reference — Models, Config, Project Structure, Errors
 
+Default embedding models, configuration parameters, project layout, and common error codes for troubleshooting.
+
 ---
 
 ## Embedding Models

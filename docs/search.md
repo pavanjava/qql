@@ -5,6 +5,8 @@ title: "SEARCH / SELECT / RECOMMEND"
 
 # SEARCH, SELECT, SCROLL, RECOMMEND, Hybrid Search & Reranking
 
+QQL supports semantic (dense), sparse (BM25/SPLADE), and hybrid search with optional reranking, SELECT for point retrieval, SCROLL for pagination, and RECOMMEND for example-driven discovery.
+
 ---
 
 ## SEARCH — find similar points
