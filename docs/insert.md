@@ -1,3 +1,8 @@
+---
+layout: default
+title: "INSERT / INSERT BULK"
+---
+
 # INSERT — Adding Documents to Qdrant
 
 QQL provides two insert statements: `INSERT` for single documents and `INSERT BULK` for batch inserts.

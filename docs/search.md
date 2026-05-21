@@ -1,3 +1,8 @@
+---
+layout: default
+title: "SEARCH / SELECT / RECOMMEND"
+---
+
 # SEARCH, SELECT, SCROLL, RECOMMEND, Hybrid Search & Reranking
 
 ---

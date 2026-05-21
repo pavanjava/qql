@@ -1,3 +1,8 @@
+---
+layout: default
+title: "WHERE Filters"
+---
+
 # WHERE Clause Filters
 
 The `WHERE` clause lets you filter on any payload field using SQL-style predicates. All standard comparison, range, membership, null-check, and full-text operators are supported.

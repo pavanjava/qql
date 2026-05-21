@@ -1,3 +1,8 @@
+---
+layout: default
+title: "Programmatic Usage"
+---
+
 # Programmatic Usage
 
 QQL can be used as a Python library without the CLI.

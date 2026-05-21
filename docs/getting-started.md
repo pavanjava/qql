@@ -1,3 +1,8 @@
+---
+layout: default
+title: "Getting Started"
+---
+
 # Getting Started with QQL
 
 QQL is a SQL-like query language and CLI for [Qdrant](https://qdrant.tech). Instead of writing Python SDK calls you write natural query statements to insert, search, manage, and delete vector data.

@@ -1,3 +1,8 @@
+---
+layout: default
+title: "Collections & Quantization"
+---
+
 # Managing Collections
 
 ---

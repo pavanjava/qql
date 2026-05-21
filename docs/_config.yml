@@ -1,4 +1,3 @@
-theme: minima
 title: "QQL — Qdrant Query Language"
 description: "SQL-like query language and CLI for Qdrant vector database — INSERT, SEARCH, hybrid search, reranking, quantization, and more."
 url: "https://pavanjava.github.io/qql"

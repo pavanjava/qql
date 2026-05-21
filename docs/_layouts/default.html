@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ page.title }} | QQL Documentation</title>
+  <meta name="description" content="{{ site.description }}">
+  <link rel="stylesheet" href="{{ '/assets/css/style.css' | relative_url }}">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+</head>
+<body>
+  <div class="app-container">
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <a href="{{ '/' | relative_url }}" class="brand">QQL</a>
+        <p class="version">CLI & Language</p>
+      </div>
+      <nav class="sidebar-nav">
+        <ul>
+          <li class="nav-heading">Documentation</li>
+          <li><a href="{{ '/getting-started.html' | relative_url }}" class="{% if page.url contains 'getting-started' %}active{% endif %}">Getting Started</a></li>
+          <li><a href="{{ '/insert.html' | relative_url }}" class="{% if page.url contains 'insert' %}active{% endif %}">INSERT / BULK</a></li>
+          <li><a href="{{ '/search.html' | relative_url }}" class="{% if page.url contains 'search' %}active{% endif %}">SEARCH / Hybrid</a></li>
+          <li><a href="{{ '/filters.html' | relative_url }}" class="{% if page.url contains 'filters' %}active{% endif %}">WHERE Filters</a></li>
+          <li><a href="{{ '/collections.html' | relative_url }}" class="{% if page.url contains 'collections' %}active{% endif %}">Collections</a></li>
+          <li><a href="{{ '/scripts.html' | relative_url }}" class="{% if page.url contains 'scripts' %}active{% endif %}">Scripts & Dump</a></li>
+          <li><a href="{{ '/programmatic.html' | relative_url }}" class="{% if page.url contains 'programmatic' %}active{% endif %}">Programmatic API</a></li>
+          <li><a href="{{ '/reference.html' | relative_url }}" class="{% if page.url contains 'reference' %}active{% endif %}">Reference</a></li>
+        </ul>
+      </nav>
+      <div class="sidebar-footer">
+        <a href="https://github.com/pavanjava/qql" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://pypi.org/project/qql-cli/" target="_blank" rel="noopener">PyPI</a>
+      </div>
+    </aside>
+    <main class="main-content">
+      <div class="content-wrapper">
+        {{ content }}
+      </div>
+    </main>
+  </div>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/sql.min.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      // Apply true syntax highlighting
+      hljs.highlightAll();
+
+      document.querySelectorAll('.content-wrapper pre').forEach(pre => {
+        // Create wrapper
+        const wrapper = document.createElement('div');
+        wrapper.className = 'code-wrapper';
+        pre.parentNode.insertBefore(wrapper, pre);
+        wrapper.appendChild(pre);
+        
+        // Create copy button
+        const btn = document.createElement('button');
+        btn.className = 'copy-btn';
+        btn.textContent = 'Copy';
+        
+        btn.addEventListener('click', () => {
+          const code = pre.querySelector('code');
+          const text = code ? code.innerText : pre.innerText;
+          navigator.clipboard.writeText(text).then(() => {
+            btn.textContent = 'Copied!';
+            btn.classList.add('copied');
+            setTimeout(() => {
+              btn.textContent = 'Copy';
+              btn.classList.remove('copied');
+            }, 2000);
+          });
+        });
+        
+        wrapper.appendChild(btn);
+      });
+    });
+  </script>
+</body>
+</html>

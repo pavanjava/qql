@@ -1,3 +1,8 @@
+---
+layout: default
+title: "Reference"
+---
+
 # Reference — Models, Config, Project Structure, Errors
 
 ---

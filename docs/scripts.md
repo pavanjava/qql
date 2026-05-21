@@ -1,3 +1,8 @@
+---
+layout: default
+title: "Scripts: EXECUTE / DUMP"
+---
+
 # Script Files — EXECUTE and DUMP
 
 QQL supports reading from and writing to `.qql` script files, making it easy to automate bulk operations, seed databases, and back up collections.
