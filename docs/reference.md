@@ -79,13 +79,13 @@ SEARCH docs SIMILAR TO 'hello' LIMIT 5
 ### Cross-encoder reranking (RERANK default)
 
 ```
-cross-encoder/ms-marco-MiniLM-L-6-v2
+Xenova/ms-marco-MiniLM-L-6-v2
 ```
 
 | Model | Notes |
 |---|---|
-| `cross-encoder/ms-marco-MiniLM-L-6-v2` | Default. Fast passage reranker |
-| `cross-encoder/ms-marco-MiniLM-L-12-v2` | Larger, higher quality |
+| `Xenova/ms-marco-MiniLM-L-6-v2` | Default. Fast passage reranker |
+| `Xenova/ms-marco-MiniLM-L-12-v2` | Larger, higher quality |
 | `BAAI/bge-reranker-base` | Strong general-purpose reranker |
 | `BAAI/bge-reranker-large` | Highest quality, slower |
 

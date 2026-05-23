@@ -370,15 +370,15 @@ SEARCH articles SIMILAR TO 'attention mechanism in transformers' LIMIT 10 USING 
 Custom cross-encoder model:
 ```sql
 SEARCH articles SIMILAR TO 'semantic search' LIMIT 5
-  RERANK MODEL 'cross-encoder/ms-marco-MiniLM-L-6-v2'
+  RERANK MODEL 'Xenova/ms-marco-MiniLM-L-6-v2'
 ```
 
-**Default cross-encoder model:** `cross-encoder/ms-marco-MiniLM-L-6-v2`
+**Default cross-encoder model:** `Xenova/ms-marco-MiniLM-L-6-v2`
 
 | Model | Notes |
 |---|---|
-| `cross-encoder/ms-marco-MiniLM-L-6-v2` | Default. Fast and accurate for passage reranking |
-| `cross-encoder/ms-marco-MiniLM-L-12-v2` | Larger, higher quality, slower |
+| `Xenova/ms-marco-MiniLM-L-6-v2` | Default. Fast and accurate for passage reranking |
+| `Xenova/ms-marco-MiniLM-L-12-v2` | Larger, higher quality, slower |
 | `BAAI/bge-reranker-base` | BGE reranker, strong general-purpose performance |
 | `BAAI/bge-reranker-large` | Highest quality BGE reranker, slower |
 

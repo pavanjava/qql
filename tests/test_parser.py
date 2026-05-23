@@ -1003,10 +1003,10 @@ class TestRerankSearch:
 
     def test_rerank_with_model(self):
         node = parse(
-            "SEARCH col SIMILAR TO 'q' LIMIT 5 RERANK MODEL 'cross-encoder/ms-marco-MiniLM-L-6-v2'"
+            "SEARCH col SIMILAR TO 'q' LIMIT 5 RERANK MODEL 'Xenova/ms-marco-MiniLM-L-6-v2'"
         )
         assert node.rerank is True
-        assert node.rerank_model == "cross-encoder/ms-marco-MiniLM-L-6-v2"
+        assert node.rerank_model == "Xenova/ms-marco-MiniLM-L-6-v2"
 
     def test_rerank_default_false(self):
         node = parse("SEARCH col SIMILAR TO 'q' LIMIT 5")
@@ -1032,12 +1032,12 @@ class TestRerankSearch:
     def test_rerank_with_hybrid_where_and_model(self):
         node = parse(
             "SEARCH col SIMILAR TO 'q' LIMIT 5 USING HYBRID WHERE year > 2020 "
-            "RERANK MODEL 'cross-encoder/ms-marco-MiniLM-L-6-v2'"
+            "RERANK MODEL 'Xenova/ms-marco-MiniLM-L-6-v2'"
         )
         assert node.hybrid is True
         assert node.query_filter is not None
         assert node.rerank is True
-        assert node.rerank_model == "cross-encoder/ms-marco-MiniLM-L-6-v2"
+        assert node.rerank_model == "Xenova/ms-marco-MiniLM-L-6-v2"
 
     def test_rerank_lowercase(self):
         node = parse("SEARCH col SIMILAR TO 'q' LIMIT 5 rerank")

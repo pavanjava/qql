@@ -431,7 +431,7 @@ SEARCH medical_records SIMILAR TO 'neuromuscular junction antibody acetylcholine
     AND sub_specialty IN ('neuromuscular', 'neuroimmunology')
     AND severity IN ('high', 'critical')
     AND year >= 2022
-  RERANK MODEL 'cross-encoder/ms-marco-MiniLM-L-6-v2'
+  RERANK MODEL 'Xenova/ms-marco-MiniLM-L-6-v2'
 ```
 
 ---
