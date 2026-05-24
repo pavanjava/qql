@@ -1,6 +1,6 @@
 [project]
 name = "qql-cli"
-version = "2.5.0"
+version = "2.6.0"
 description = "QQL is a SQL-like query language and CLI for Qdrant vector database. Write INSERT, SEARCH, RECOMMEND, DELETE, and CREATE COLLECTION statements instead of Python SDK calls. Supports hybrid dense+sparse vector search, cross-encoder reranking, quantization (scalar, turbo, binary, product), WHERE clause filters, script execution, and collection dump/restore."
 readme = "README.md"
 license = { file = "LICENSE" }
