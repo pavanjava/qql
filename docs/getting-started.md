@@ -5,7 +5,7 @@ title: "Getting Started"
 
 # Getting Started with QQL
 
-QQL is a SQL-like query language and CLI for [Qdrant](https://qdrant.tech). Instead of writing Python SDK calls you write natural query statements to insert, search, manage, and delete vector data.
+QQL is a SQL-like query language and CLI for [Qdrant](https://qdrant.tech). Instead of writing Python SDK calls you write natural query statements to insert, search, manage, and delete vector data. It can also be used as a sync or async Python library with batching, parameterized queries, and optional gRPC transport.
 
 ---
 
@@ -154,6 +154,12 @@ SHOW COLLECTION notes
 
 -- Retrieve a point by ID
 SELECT * FROM notes WHERE id = 1
+
+-- Run compatible queries as one batch
+BEGIN BATCH;
+  SEARCH notes SIMILAR TO 'vector databases' LIMIT 5;
+  SEARCH notes SIMILAR TO 'semantic search' LIMIT 5;
+END BATCH
 ```
 
 ---
@@ -164,5 +170,6 @@ SELECT * FROM notes WHERE id = 1
 - [SEARCH / SELECT / SCROLL / RECOMMEND / Hybrid / RERANK](search.md) — querying
 - [WHERE Filters](filters.md) — payload filtering
 - [Collections & Quantization](collections.md) — managing collections
-- [Scripts: EXECUTE / DUMP](scripts.md) — automating with script files
+- [Scripts: EXECUTE / DUMP](scripts.md) — automating with script files and batch blocks
+- [Programmatic Usage](programmatic.md) — sync/async APIs, batching, parameterized queries, gRPC
 - [Embedding Models](reference.md#embedding-models) — model reference

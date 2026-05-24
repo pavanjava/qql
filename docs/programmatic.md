@@ -16,6 +16,8 @@ single connection to Qdrant once and reuses it for every `run_query()` call —
 more efficient than the legacy `run_query()` function, which creates a new
 client on every invocation.
 
+Use `AsyncConnection` when your application already runs on `asyncio`.
+
 ### Basic usage
 
 ```python
@@ -66,6 +68,22 @@ with Connection("http://localhost:6333") as conn:
 from qql import Connection
 
 with Connection("https://<your-cluster>.qdrant.io", secret="<your-api-key>") as conn:
+    result = conn.run_query("SHOW COLLECTIONS")
+    print(result.data)
+```
+
+### gRPC transport
+
+QQL can ask the Qdrant client to prefer gRPC for lower request overhead:
+
+```python
+from qql import Connection
+
+with Connection(
+    "http://localhost:6333",
+    prefer_grpc=True,
+    grpc_port=6334,
+) as conn:
     result = conn.run_query("SHOW COLLECTIONS")
     print(result.data)
 ```
@@ -155,8 +173,116 @@ with Connection("http://localhost:6333") as conn:
 | `url` | `str` | `"http://localhost:6333"` | Qdrant instance URL |
 | `secret` | `str \| None` | `None` | API key; `None` for unauthenticated |
 | `default_model` | `str \| None` | `None` → `sentence-transformers/all-MiniLM-L6-v2` | Dense embedding model used when no `USING MODEL` clause is given |
+| `prefer_grpc` | `bool` | `False` | Passes `prefer_grpc=True` to the Qdrant client |
+| `grpc_port` | `int` | `6334` | gRPC port used when `prefer_grpc=True` |
 | `default_dense_vector_name` | `str` | `"dense"` | Dense vector name used when QQL creates a collection and no explicit `USING VECTOR` name is given |
 | `default_sparse_vector_name` | `str` | `"sparse"` | Sparse vector name used when QQL creates a hybrid collection and no explicit sparse vector name is given |
+
+---
+
+## Parameterized Queries
+
+Parameterized helpers render `:name` placeholders before parsing the QQL statement. String values are quoted and escaped; booleans are rendered as `true` / `false`.
+
+```python
+from qql import Connection
+
+with Connection("http://localhost:6333") as conn:
+    result = conn.run_parameterized_query(
+        "SEARCH notes SIMILAR TO :query LIMIT 5 WHERE author = :author",
+        {"query": "vector database", "author": "alice"},
+    )
+
+    results = conn.run_parameterized_batch(
+        "SEARCH notes SIMILAR TO :query LIMIT 5 WHERE category = :category",
+        [
+            {"query": "brain stroke", "category": "Neurology"},
+            {"query": "heart attack", "category": "Cardiology"},
+        ],
+    )
+```
+
+Parameterized queries are a convenience for building QQL strings safely in application code; they are not sent to Qdrant as server-side prepared statements.
+
+---
+
+## Batch Execution
+
+`run_queries_batch()` parses multiple QQL strings into a `BatchBlockStmt`. The executor groups compatible statements:
+
+- compatible `SEARCH` / `RECOMMEND` statements use Qdrant `query_batch_points`
+- compatible `INSERT` statements become one `INSERT BULK`
+- mixed or incompatible statements still execute in order
+
+```python
+from qql import Connection
+
+with Connection("http://localhost:6333") as conn:
+    results = conn.run_queries_batch([
+        "SEARCH docs SIMILAR TO 'neurology' LIMIT 5",
+        "SEARCH docs SIMILAR TO 'cardiology' LIMIT 5",
+    ])
+
+    for result in results:
+        print(result.message)
+```
+
+For ergonomic batching in application code, use `QQLBatch`:
+
+```python
+from qql import Connection, QQLBatch
+
+with Connection("http://localhost:6333") as conn:
+    with QQLBatch(conn) as batch:
+        neuro = batch.add("SEARCH docs SIMILAR TO 'neurology' LIMIT 5")
+        cardio = batch.add("SEARCH docs SIMILAR TO 'cardiology' LIMIT 5")
+
+    print(neuro.result.data)
+    print(cardio.result.data)
+```
+
+Each proxy's `.result` becomes available after the context manager exits.
+
+---
+
+## Async API
+
+`AsyncConnection` mirrors the sync API for `asyncio` applications and uses `AsyncQdrantClient` under the hood.
+
+```python
+from qql import AsyncConnection
+
+async with AsyncConnection("http://localhost:6333") as conn:
+    await conn.run_query(
+        "INSERT INTO COLLECTION notes VALUES {'text': 'async QQL'}"
+    )
+    result = await conn.run_query(
+        "SEARCH notes SIMILAR TO 'async vector search' LIMIT 5"
+    )
+    print(result.data)
+```
+
+Async batching and parameterized helpers are also available:
+
+```python
+from qql import AsyncConnection, QQLAsyncBatch
+
+async with AsyncConnection("http://localhost:6333", prefer_grpc=True) as conn:
+    result = await conn.run_parameterized_query(
+        "SEARCH docs SIMILAR TO :query LIMIT 5",
+        {"query": "clinical notes"},
+    )
+
+    async with QQLAsyncBatch(conn) as batch:
+        first = batch.add("SEARCH docs SIMILAR TO 'neurology' LIMIT 5")
+        second = batch.add("SEARCH docs SIMILAR TO 'cardiology' LIMIT 5")
+
+    print(first.result.data, second.result.data)
+```
+
+The async executor preserves the same `ExecutionResult` shape as the sync executor.
+
+---
 
 ### Power-user: `executor` property
 
@@ -250,7 +376,8 @@ class ExecutionResult:
 |---|---|
 | INSERT (dense) | `{"id": int \| "<uuid>", "collection": "<name>"}` |
 | INSERT (hybrid) | `{"id": int \| "<uuid>", "collection": "<name>"}` |
-| INSERT BULK | `None` (count in `result.message`) |
+| INSERT BULK | `{"ids": [int \| "<uuid>", ...]}` |
+| BEGIN BATCH / programmatic batch | `[ExecutionResult, ...]` |
 | SELECT | `{"id": str, "payload": dict}` or `None` when not found |
 | SEARCH | `[{"id": str, "score": float, "payload": dict}, ...]` |
 | SCROLL | `{"points": [{"id": str, "payload": dict}, ...], "next_offset": str \| int \| None}` |

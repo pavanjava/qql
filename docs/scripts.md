@@ -5,7 +5,7 @@ title: "Scripts: EXECUTE / DUMP"
 
 # Script Files — EXECUTE and DUMP
 
-QQL supports reading from and writing to `.qql` script files, making it easy to automate bulk operations, seed databases, and back up collections.
+QQL supports reading from and writing to `.qql` script files, making it easy to automate bulk operations, seed databases, and back up collections. Scripts can contain regular statements or explicit `BEGIN BATCH ... END BATCH` blocks.
 
 ---
 
@@ -51,9 +51,53 @@ SHOW COLLECTIONS
 **Rules:**
 - `--` to end-of-line is a comment and is ignored (inline or full-line)
 - Statements can span multiple lines (e.g. `INSERT BULK ... VALUES [...]`)
+- `BEGIN BATCH ... END BATCH` is treated as one statement by the script splitter
+- Semicolons are optional between top-level statements, but useful inside batch blocks
 - `RECOMMEND` statements work in `.qql` files the same way they do in the REPL
 - Blank lines between statements are ignored
 - By default all statements run even if one fails; use `--stop-on-error` to halt early
+
+---
+
+## BEGIN BATCH — group statements for fewer Qdrant calls
+
+Use `BEGIN BATCH ... END BATCH` when you want QQL to parse several statements as one executable batch. The executor keeps statement order in the returned results while grouping compatible operations internally.
+
+```sql
+BEGIN BATCH;
+  SEARCH articles SIMILAR TO 'stroke symptoms' LIMIT 5 WHERE department = 'neurology';
+  SEARCH articles SIMILAR TO 'cardiac markers' LIMIT 5 WHERE department = 'cardiology';
+  RECOMMEND FROM articles POSITIVE IDS (1001, 1002) LIMIT 5;
+END BATCH
+```
+
+Batch execution rules:
+
+- compatible `SEARCH` / `RECOMMEND` statements for the same collection use Qdrant `query_batch_points`
+- compatible `INSERT` statements are combined into one bulk insert
+- incompatible or mutation statements still execute in order
+- each child statement produces its own `ExecutionResult`
+
+You can also use batch blocks directly in the REPL or through `Connection.run_query()`.
+
+```python
+from qql import Connection
+
+with Connection("http://localhost:6333") as conn:
+    result = conn.run_query("""
+    BEGIN BATCH;
+      SEARCH articles SIMILAR TO 'neurology' LIMIT 5;
+      SEARCH articles SIMILAR TO 'cardiology' LIMIT 5;
+    END BATCH
+    """)
+
+    for child in result.data:
+        print(child.message)
+```
+
+Programmatic callers can use `run_queries_batch()` or `QQLBatch` instead of writing a batch block by hand. See [Programmatic Usage](programmatic.md#batch-execution).
+
+---
 
 **Included examples:**
 - [`resources/sample.qql`](../resources/sample.qql) seeds the demo medical dataset

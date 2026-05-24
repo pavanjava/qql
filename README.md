@@ -5,9 +5,9 @@
 [![PyPI version](https://img.shields.io/pypi/v/qql-cli?color=blue&label=PyPI)](https://pypi.org/project/qql-cli/)
 [![Python 3.12+](https://img.shields.io/pypi/pyversions/qql-cli)](https://pypi.org/project/qql-cli/)
 [![MIT License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-549%20passing-brightgreen)](tests/)
+[![Tests](https://img.shields.io/badge/tests-635%20passing-brightgreen)](tests/)
 
-Write `INSERT`, `SELECT`, `SEARCH`, `SCROLL`, `RECOMMEND`, `UPDATE`, `DELETE`, and `CREATE COLLECTION` statements instead of Python SDK calls. Supports hybrid dense+sparse vector search, grouped search (GROUP BY), cross-encoder reranking, quantization (scalar, turbo, binary, product), SQL-style `WHERE` filters, script execution, and collection dump/restore.
+Write `INSERT`, `SELECT`, `SEARCH`, `SCROLL`, `RECOMMEND`, `UPDATE`, `DELETE`, and `CREATE COLLECTION` statements instead of Python SDK calls. Supports hybrid dense+sparse vector search, grouped search (GROUP BY), cross-encoder reranking, quantization (scalar, turbo, binary, product), SQL-style `WHERE` filters, script execution, collection dump/restore, async execution, gRPC transport, parameterized queries, and batched query execution.
 
 ```
 qql> INSERT INTO COLLECTION notes VALUES {'text': 'Qdrant is a vector database', 'author': 'alice', 'year': 2024}
@@ -50,16 +50,23 @@ Your query string
 
 When you run `INSERT`, the `text` field is automatically converted into a dense vector using [Fastembed](https://github.com/qdrant/fastembed). In **hybrid mode** (`USING HYBRID`), a sparse BM25 vector is also generated alongside the dense vector, and searches use Qdrant's Reciprocal Rank Fusion (RRF) by default to merge the results of both retrieval methods. You can switch hybrid search to DBSF with `FUSION 'dbsf'`.
 
-QQL also exposes a **programmatic API** for use inside Python applications — no CLI required:
+QQL also exposes a **programmatic API** for use inside Python applications — no CLI required. Use `Connection` for sync code, `AsyncConnection` for async apps, and batch helpers when you want QQL to combine compatible operations into fewer Qdrant requests:
 
 ```python
-from qql import Connection
+from qql import Connection, QQLBatch
 
 with Connection("http://localhost:6333") as conn:
     conn.run_query("INSERT INTO COLLECTION notes VALUES {'text': 'Qdrant is fast'}")
-    result = conn.run_query("SEARCH notes SIMILAR TO 'vector database' LIMIT 5")
-    for hit in result.data:
-        print(hit["score"], hit["payload"])
+    result = conn.run_parameterized_query(
+        "SEARCH notes SIMILAR TO :query LIMIT 5",
+        {"query": "vector database"},
+    )
+
+    with QQLBatch(conn) as batch:
+        neurology = batch.add("SEARCH notes SIMILAR TO 'neurology' LIMIT 5")
+        cardiology = batch.add("SEARCH notes SIMILAR TO 'cardiology' LIMIT 5")
+
+    print(neurology.result.data, cardiology.result.data)
 ```
 
 ---
@@ -97,8 +104,8 @@ Full documentation lives in the [`docs/`](docs/) folder and at **[pavanjava.gith
 | [SEARCH / SELECT / SCROLL / RECOMMEND / Hybrid / GROUP BY / RERANK](docs/search.md) | Semantic search, grouped search, point retrieval, pagination, hybrid, reranking, recommendations |
 | [WHERE Filters](docs/filters.md) | Full SQL-style filter operators |
 | [Collections & Quantization](docs/collections.md) | SHOW, CREATE, DROP, QUANTIZE (scalar/turbo/binary/product), CREATE INDEX, UPDATE VECTOR, UPDATE PAYLOAD |
-| [Scripts: EXECUTE / DUMP](docs/scripts.md) | Script files, collection backup/restore |
-| [Programmatic Usage](docs/programmatic.md) | Use QQL as a Python library via `Connection` or `run_query()` |
+| [Scripts: EXECUTE / DUMP](docs/scripts.md) | Script files, `BEGIN BATCH` blocks, collection backup/restore |
+| [Programmatic Usage](docs/programmatic.md) | Sync/async Python APIs, parameterized queries, batching, gRPC |
 | [Reference: Models / Config / Errors](docs/reference.md) | Embedding models, config file, error reference |
 
 ---
@@ -170,6 +177,12 @@ DELETE FROM articles WHERE year < 2020
 -- Scripts
 EXECUTE /path/to/script.qql
 DUMP articles /path/to/backup.qql
+
+-- Batch block
+BEGIN BATCH;
+  SEARCH articles SIMILAR TO 'query one' LIMIT 5;
+  SEARCH articles SIMILAR TO 'query two' LIMIT 5;
+END BATCH
 ```
 
 ---
@@ -182,7 +195,7 @@ Tests do not require a running Qdrant instance — the Qdrant client is mocked.
 pytest tests/ -v
 ```
 
-Expected: **549 tests passing**.
+Expected: **635 tests passing**.
 
 ---
 

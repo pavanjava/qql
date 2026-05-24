@@ -1,77 +1,43 @@
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass
+import asyncio
 from typing import Any
 
-from qdrant_client import QdrantClient
+from qdrant_client import AsyncQdrantClient
 from qdrant_client.http.exceptions import UnexpectedResponse
 from qdrant_client.models import (
-    AcornSearchParams,
-    BinaryQuantization,
-    BinaryQuantizationConfig,
-    CollectionParamsDiff,
-    CompressionRatio,
     Distance,
-    Disabled,
     Filter,
     FusionQuery,
-    HnswConfigDiff,
-    KeywordIndexParams,
-    KeywordIndexType,
-    Language,
     LookupLocation,
     Modifier,
-    OptimizersConfigDiff,
-    PayloadSchemaType,
     PointStruct,
     PointVectors,
     Prefetch,
-    ProductQuantization,
-    ProductQuantizationConfig,
-    QuantizationSearchParams,
     RecommendInput,
     RecommendQuery,
     QueryRequest,
-    ScalarQuantization,
-    ScalarQuantizationConfig,
-    ScalarType,
-    TurboQuantBitSize,
-    TurboQuantization,
-    TurboQuantQuantizationConfig,
     SearchParams,
     SparseVector,
     SparseVectorParams,
-    StopwordsSet,
-    TextIndexParams,
-    TextIndexType,
-    TokenizerType,
-    UuidIndexParams,
-    UuidIndexType,
     VectorParams,
-    VectorParamsDiff,
-    MaxOptimizationThreadsSetting,
+    PayloadSchemaType,
 )
 
 from .ast_nodes import (
     ASTNode,
     AlterCollectionStmt,
-    CollectionConfig,
     CreateCollectionStmt,
     CreateIndexStmt,
     DeleteStmt,
     DropCollectionStmt,
-    FilterExpr,
     InsertBulkStmt,
     InsertStmt,
-    QuantizationUpdate,
-    QuantizationConfig,
-    QuantizationType,
     RecommendStmt,
     SelectStmt,
     ScrollStmt,
     SearchStmt,
-    SearchWith,
     ShowCollectionStmt,
     ShowCollectionsStmt,
     UpdateVectorStmt,
@@ -79,13 +45,13 @@ from .ast_nodes import (
     BatchBlockStmt,
 )
 from .config import QQLConfig
-from .embedder import CrossEncoderEmbedder, Embedder, SparseEmbedder
+from .embedder import Embedder, SparseEmbedder
 from .exceptions import QQLRuntimeError
+from .executor import Executor, ExecutionResult, CollectionTopology
 from .utils import (
     build_bulk_insert_from_group,
     build_dense_point_vector,
     build_dense_query,
-    build_qdrant_filter,
     collection_topology_kwargs,
     exclude_ids_from_filter,
     extract_point_id_and_payload,
@@ -95,7 +61,6 @@ from .utils import (
     parse_recommend_strategy,
     resolve_hybrid_fusion,
     validate_search_mmr_usage,
-    wrap_as_filter,
 )
 
 _RERANK_FETCH_MULTIPLIER = 4
@@ -104,187 +69,157 @@ _COLLECTION_VISIBILITY_TIMEOUT_SECONDS = 5.0
 _COLLECTION_VISIBILITY_POLL_SECONDS = 0.05
 
 
-@dataclass
-class ExecutionResult:
-    success: bool
-    message: str
-    data: Any = None
+class AsyncExecutor(Executor):
+    """Asynchronous QQL execution engine for ``AsyncQdrantClient``.
 
+    The async executor mirrors :class:`~qql.Executor` at the statement boundary:
+    every AST node supported by the sync executor has an async execution path
+    here. Pure parsing, validation, vector-shaping, filter-building, and result
+    formatting helpers live in ``qql.utils`` or are inherited from
+    :class:`~qql.Executor`; only Qdrant client calls and collection-creation
+    coordination are implemented with ``async``/``await`` in this module.
+    """
 
-@dataclass(frozen=True)
-class CollectionTopology:
-    exists: bool
-    is_named_dense: bool
-    has_unnamed_dense: bool = False
-    dense_names: tuple[str, ...] = ()
-    sparse_names: tuple[str, ...] = ()
-    # Sizes fetched once in _resolve_topology() so _ensure_collection() never
-    # needs a second get_collection() call.
-    dense_sizes: tuple[tuple[str, int], ...] = ()
+    def __init__(self, client: AsyncQdrantClient, config: QQLConfig) -> None:
+        super().__init__(client=client, config=config)  # type: ignore[arg-type]
+        self._client: AsyncQdrantClient = client
+        self._creation_lock = asyncio.Lock()
 
-    def dense_size_map(self) -> dict[str, int]:
-        """Return {vector_name: size} for every dense vector whose size was fetched.
-
-        Unnamed single-vector collections appear under the ``""`` key, matching
-        ``dense_config_key()``.  Returns an empty dict when ``exists`` is False or
-        sizes were not available (e.g. when a mock omits the size attribute).
-        """
-        return dict(self.dense_sizes)
-
-    @property
-    def has_dense(self) -> bool:
-        return self.has_unnamed_dense or bool(self.dense_names)
-
-    @property
-    def has_sparse(self) -> bool:
-        return bool(self.sparse_names)
-
-    @property
-    def is_hybrid(self) -> bool:
-        return self.has_dense and self.has_sparse
-
-    def dense_using(self, explicit: str | None = None) -> str | None:
-        if explicit is not None:
-            if self.exists and self.has_unnamed_dense:
-                raise QQLRuntimeError(
-                    "Collection uses an unnamed dense vector; omit USING VECTOR"
-                )
-            if self.exists and explicit not in self.dense_names:
-                raise QQLRuntimeError(
-                    f"Collection has no dense vector named '{explicit}'"
-                )
-            return explicit
-        if self.has_unnamed_dense:
-            return None
-        if len(self.dense_names) == 1:
-            return self.dense_names[0]
-        if not self.dense_names:
-            raise QQLRuntimeError("Collection has no dense vector")
-        raise QQLRuntimeError(
-            "Collection has multiple dense vectors; specify one with USING VECTOR '<name>'"
-        )
-
-    def dense_payload_name(self, explicit: str | None = None) -> str | None:
-        return self.dense_using(explicit)
-
-    def dense_config_key(self, explicit: str | None = None) -> str:
-        name = self.dense_using(explicit)
-        return "" if name is None else name
-
-    def sparse_using(self, explicit: str | None = None) -> str:
-        if explicit is not None:
-            if self.exists and explicit not in self.sparse_names:
-                raise QQLRuntimeError(
-                    f"Collection has no sparse vector named '{explicit}'"
-                )
-            return explicit
-        if len(self.sparse_names) == 1:
-            return self.sparse_names[0]
-        if not self.sparse_names:
-            raise QQLRuntimeError("Collection has no sparse vector")
-        raise QQLRuntimeError(
-            "Collection has multiple sparse vectors; specify one with USING SPARSE VECTOR '<name>'"
-        )
-
-
-class Executor:
-    def __init__(self, client: QdrantClient, config: QQLConfig) -> None:
-        self._client = client
-        self._config = config
-
-    def execute(self, node: ASTNode) -> ExecutionResult:
+    async def execute(self, node: ASTNode) -> ExecutionResult:
         if isinstance(node, InsertBulkStmt):
-            return self._execute_insert_bulk(node)
+            return await self._execute_insert_bulk(node)
         if isinstance(node, InsertStmt):
-            return self._execute_insert(node)
+            return await self._execute_insert(node)
         if isinstance(node, CreateCollectionStmt):
-            return self._execute_create(node)
+            return await self._execute_create(node)
         if isinstance(node, AlterCollectionStmt):
-            return self._execute_alter_collection(node)
+            return await self._execute_alter_collection(node)
         if isinstance(node, CreateIndexStmt):
-            return self._execute_create_index(node)
+            return await self._execute_create_index(node)
         if isinstance(node, DropCollectionStmt):
-            return self._execute_drop(node)
+            return await self._execute_drop(node)
         if isinstance(node, ShowCollectionsStmt):
-            return self._execute_show(node)
+            return await self._execute_show(node)
         if isinstance(node, ShowCollectionStmt):
-            return self._execute_show_collection(node)
+            return await self._execute_show_collection(node)
         if isinstance(node, ScrollStmt):
-            return self._execute_scroll(node)
+            return await self._execute_scroll(node)
         if isinstance(node, SelectStmt):
-            return self._execute_select(node)
+            return await self._execute_select(node)
         if isinstance(node, SearchStmt):
-            return self._execute_search(node)
+            return await self._execute_search(node)
         if isinstance(node, RecommendStmt):
-            return self._execute_recommend(node)
+            return await self._execute_recommend(node)
         if isinstance(node, DeleteStmt):
-            return self._execute_delete(node)
+            return await self._execute_delete(node)
         if isinstance(node, UpdateVectorStmt):
-            return self._execute_update_vector(node)
+            return await self._execute_update_vector(node)
         if isinstance(node, UpdatePayloadStmt):
-            return self._execute_update_payload(node)
+            return await self._execute_update_payload(node)
         if isinstance(node, BatchBlockStmt):
-            return self._execute_batch_block(node)
+            return await self._execute_batch_block(node)
         raise QQLRuntimeError(f"Unknown AST node type: {type(node)}")
 
-    # ── Statement executors ───────────────────────────────────────────────
+    # ── Topology & Helper methods ─────────────────────────────────────────
 
-    def _fetch_collection_info(self, name: str):
-        """Fetch full CollectionInfo for *name* in a single API call.
+    async def _resolve_topology(self, name: str) -> CollectionTopology:
+        if not await self._client.collection_exists(name):
+            return CollectionTopology(exists=False, is_named_dense=False)
 
-        Returns the CollectionInfo object when the collection exists, or
-        ``None`` when the collection is not found (HTTP 404).  Any other
-        Qdrant error is re-raised as :class:`QQLRuntimeError`.
-        """
-        try:
-            return self._client.get_collection(name)
-        except UnexpectedResponse as e:
-            if e.status_code == 404:
-                return None
-            raise QQLRuntimeError(
-                f"Qdrant error fetching collection '{name}': {e}"
-            ) from e
-        except ValueError as e:
-            if f"Collection {name} not found" in str(e):
-                return None
-            raise
-
-    def _topology_from_collection_info(self, info: Any) -> CollectionTopology:
-        """Parse a CollectionInfo object into a :class:`CollectionTopology`.
-
-        Separates API access (handled by :meth:`_fetch_collection_info`) from
-        topology parsing so each concern can be tested independently.
-        """
+        info = await self._client.get_collection(name)
         params = info.config.params
         vectors = params.vectors  # type: ignore[union-attr]
         sparse_vectors = params.sparse_vectors or {}
         return CollectionTopology(**collection_topology_kwargs(vectors, sparse_vectors))
 
-    def _resolve_topology(self, name: str) -> CollectionTopology:
-        """Return the topology for *name* using exactly one Qdrant API call.
+    async def _ensure_collection(
+        self,
+        name: str,
+        vector_size: int,
+        topology: CollectionTopology,
+        explicit_vector: str | None,
+    ) -> None:
+        if topology.exists:
+            info = await self._client.get_collection(name)
+            vectors = info.config.params.vectors  # type: ignore[union-attr]
+            if isinstance(vectors, dict):
+                vector_name = topology.dense_using(explicit_vector)
+                if vector_name is None:
+                    raise QQLRuntimeError("Collection has no dense vector")
+                vector_config = vectors[vector_name]
+                expected_size = getattr(vector_config, "size", None)
+                if expected_size is not None and expected_size != vector_size:
+                    raise QQLRuntimeError(
+                        f"Vector dimension mismatch: collection '{name}' vector "
+                        f"'{vector_name}' expects {expected_size} dims, but "
+                        f"model produces {vector_size} dims. Specify a compatible "
+                        "model with USING MODEL '<model>'."
+                    )
+            elif vectors is not None:
+                if vectors.size != vector_size:
+                    raise QQLRuntimeError(
+                        f"Vector dimension mismatch: collection '{name}' expects "
+                        f"{vectors.size} dims, but model produces {vector_size} dims. "
+                        f"Specify a compatible model with USING MODEL '<model>'."
+                    )
+            else:
+                raise QQLRuntimeError("Collection has no dense vector")
+        else:
+            async with self._creation_lock:
+                current_topology = await self._resolve_topology(name)
+                if current_topology.exists:
+                    await self._ensure_collection(name, vector_size, current_topology, explicit_vector)
+                    return
 
-        Calls :meth:`_fetch_collection_info` once.  A 404 response is treated
-        as ``exists=False``; any other error is propagated.
-        """
-        info = self._fetch_collection_info(name)
-        if info is None:
-            return CollectionTopology(exists=False, is_named_dense=False)
-        return self._topology_from_collection_info(info)
+                await self._create_collection_and_wait(
+                    collection_name=name,
+                    vectors_config={
+                        explicit_vector or self._default_dense_vector_name(): VectorParams(
+                            size=vector_size, distance=Distance.COSINE
+                        )
+                    },
+                )
 
-    def _default_dense_vector_name(self) -> str:
-        return self._config.default_dense_vector_name
+    async def _create_collection_and_wait(self, **kwargs: Any) -> None:
+        collection_name = kwargs["collection_name"]
+        await self._client.create_collection(**kwargs)
 
-    def _default_sparse_vector_name(self) -> str:
-        return self._config.default_sparse_vector_name
+        deadline = time.monotonic() + _COLLECTION_VISIBILITY_TIMEOUT_SECONDS
+        while time.monotonic() < deadline:
+            if await self._client.collection_exists(collection_name):
+                return
+            await asyncio.sleep(_COLLECTION_VISIBILITY_POLL_SECONDS)
 
-    def _execute_insert(self, node: InsertStmt) -> ExecutionResult:
+        raise QQLRuntimeError(
+            f"Collection '{collection_name}' was created but did not become visible in time"
+        )
+
+    async def _build_hybrid_vectors(
+        self,
+        query_text: str,
+        dense_model: str,
+        sparse_model_name: str,
+    ) -> tuple[list[float], SparseVector]:
+        dense_embedder = Embedder(dense_model)
+        sparse_embedder = SparseEmbedder(sparse_model_name)
+
+        dense_vector = dense_embedder.embed(query_text)
+        sparse_obj = sparse_embedder.query_embed(query_text)
+        sparse_vector = SparseVector(
+            indices=sparse_obj["indices"],
+            values=sparse_obj["values"],
+        )
+        return dense_vector, sparse_vector
+
+    # ── Statement executors ───────────────────────────────────────────────
+
+    async def _execute_insert(self, node: InsertStmt) -> ExecutionResult:
         if "text" not in node.values:
             raise QQLRuntimeError("INSERT requires a 'text' field in VALUES")
 
-        topology = self._resolve_topology(node.collection)
+        topology = await self._resolve_topology(node.collection)
         use_hybrid = node.hybrid or (topology.exists and topology.is_hybrid)
 
-        # ── Hybrid INSERT: dense + sparse vectors ──────────────────────────
         if use_hybrid:
             dense_model = node.model or self._config.default_model
             sparse_model_name = node.sparse_model or SparseEmbedder.DEFAULT_MODEL
@@ -293,6 +228,7 @@ class Executor:
 
             dense_vector = dense_embedder.embed(node.values["text"])
             sparse_obj = sparse_embedder.embed(node.values["text"])
+
             sparse_vector = SparseVector(
                 indices=sparse_obj["indices"],
                 values=sparse_obj["values"],
@@ -310,21 +246,27 @@ class Executor:
                 dense_name = resolved_dense
                 sparse_name = topology.sparse_using(node.sparse_vector)
             else:
-                self._create_collection_and_wait(
-                    collection_name=node.collection,
-                    vectors_config={
-                        dense_name: VectorParams(
-                            size=len(dense_vector), distance=Distance.COSINE
+                async with self._creation_lock:
+                    current_topology = await self._resolve_topology(node.collection)
+                    if not current_topology.exists:
+                        await self._create_collection_and_wait(
+                            collection_name=node.collection,
+                            vectors_config={
+                                dense_name: VectorParams(
+                                    size=len(dense_vector), distance=Distance.COSINE
+                                )
+                            },
+                            sparse_vectors_config={
+                                sparse_name: SparseVectorParams(modifier=Modifier.IDF)
+                            },
                         )
-                    },
-                    sparse_vectors_config={
-                        sparse_name: SparseVectorParams(modifier=Modifier.IDF)
-                    },
-                )
+                    else:
+                        dense_name = current_topology.dense_using(node.dense_vector) or dense_name
+                        sparse_name = current_topology.sparse_using(node.sparse_vector)
 
             point_id, payload = extract_point_id_and_payload(node.values)
             try:
-                self._client.upsert(
+                await self._client.upsert(
                     collection_name=node.collection,
                     wait=True,
                     points=[
@@ -344,12 +286,11 @@ class Executor:
                 data={"id": point_id, "collection": node.collection},
             )
 
-        # ── Standard dense-only INSERT ─────────────────────────────────────
         model_name = node.model or self._config.default_model
         embedder = Embedder(model_name)
         vector = embedder.embed(node.values["text"])
 
-        self._ensure_collection(
+        await self._ensure_collection(
             node.collection, len(vector), topology, node.dense_vector
         )
         point_vector = build_dense_point_vector(
@@ -362,7 +303,7 @@ class Executor:
         point_id, payload = extract_point_id_and_payload(node.values)
 
         try:
-            self._client.upsert(
+            await self._client.upsert(
                 collection_name=node.collection,
                 wait=True,
                 points=[PointStruct(id=point_id, vector=point_vector, payload=payload)],
@@ -376,7 +317,7 @@ class Executor:
             data={"id": point_id, "collection": node.collection},
         )
 
-    def _execute_insert_bulk(self, node: InsertBulkStmt) -> ExecutionResult:
+    async def _execute_insert_bulk(self, node: InsertBulkStmt) -> ExecutionResult:
         if not node.values_list:
             raise QQLRuntimeError("INSERT BULK VALUES list is empty")
         for i, vals in enumerate(node.values_list):
@@ -385,10 +326,9 @@ class Executor:
                     f"INSERT BULK: item at index {i} is missing required 'text' field"
                 )
 
-        topology = self._resolve_topology(node.collection)
+        topology = await self._resolve_topology(node.collection)
         use_hybrid = node.hybrid or (topology.exists and topology.is_hybrid)
 
-        # ── Hybrid bulk INSERT: dense + sparse vectors ─────────────────────
         if use_hybrid:
             dense_model = node.model or self._config.default_model
             sparse_model_name = node.sparse_model or SparseEmbedder.DEFAULT_MODEL
@@ -405,14 +345,17 @@ class Executor:
                 dense_name = resolved_dense
                 sparse_name = topology.sparse_using(node.sparse_vector)
 
-            first_dense_vector: list[float] | None = None
+            dense_vectors = [
+                dense_embedder.embed(vals["text"]) for vals in node.values_list
+            ]
+            sparse_objs = [sparse_embedder.embed(vals["text"]) for vals in node.values_list]
+
+            first_dense_vector = dense_vectors[0] if dense_vectors else None
             points: list[PointStruct] = []
-            for vals in node.values_list:
+            for idx, vals in enumerate(node.values_list):
                 point_id, payload = extract_point_id_and_payload(vals)
-                dense_vector = dense_embedder.embed(vals["text"])
-                if first_dense_vector is None:
-                    first_dense_vector = dense_vector
-                sparse_obj = sparse_embedder.embed(vals["text"])
+                dense_vector = dense_vectors[idx]
+                sparse_obj = sparse_objs[idx]
                 sparse_vector = SparseVector(
                     indices=sparse_obj["indices"], values=sparse_obj["values"]
                 )
@@ -426,18 +369,24 @@ class Executor:
 
             if not topology.exists:
                 assert first_dense_vector is not None
-                self._create_collection_and_wait(
-                    collection_name=node.collection,
-                    vectors_config={
-                        dense_name: VectorParams(size=len(first_dense_vector), distance=Distance.COSINE)
-                    },
-                    sparse_vectors_config={
-                        sparse_name: SparseVectorParams(modifier=Modifier.IDF)
-                    },
-                )
+                async with self._creation_lock:
+                    current_topology = await self._resolve_topology(node.collection)
+                    if not current_topology.exists:
+                        await self._create_collection_and_wait(
+                            collection_name=node.collection,
+                            vectors_config={
+                                dense_name: VectorParams(size=len(first_dense_vector), distance=Distance.COSINE)
+                            },
+                            sparse_vectors_config={
+                                sparse_name: SparseVectorParams(modifier=Modifier.IDF)
+                            },
+                        )
+                    else:
+                        dense_name = current_topology.dense_using(node.dense_vector) or dense_name
+                        sparse_name = current_topology.sparse_using(node.sparse_vector)
 
             try:
-                self._client.upsert(
+                await self._client.upsert(
                     collection_name=node.collection,
                     wait=True,
                     points=points,
@@ -451,16 +400,15 @@ class Executor:
                 data={"ids": [p.id for p in points]},
             )
 
-        # ── Standard dense-only bulk INSERT ───────────────────────────────
         model_name = node.model or self._config.default_model
         embedder = Embedder(model_name)
 
-        first_vector: list[float] | None = None
+        vectors = [embedder.embed(vals["text"]) for vals in node.values_list]
+
+        first_vector = vectors[0] if vectors else None
         points = []
-        for vals in node.values_list:
-            vector = embedder.embed(vals["text"])
-            if first_vector is None:
-                first_vector = vector
+        for idx, vals in enumerate(node.values_list):
+            vector = vectors[idx]
             point_id, payload = extract_point_id_and_payload(vals)
             point_vector = build_dense_point_vector(
                 topology,
@@ -473,12 +421,12 @@ class Executor:
             )
 
         assert first_vector is not None
-        self._ensure_collection(
+        await self._ensure_collection(
             node.collection, len(first_vector), topology, node.dense_vector
         )
 
         try:
-            self._client.upsert(
+            await self._client.upsert(
                 collection_name=node.collection,
                 wait=True,
                 points=points,
@@ -492,8 +440,8 @@ class Executor:
             data={"ids": [p.id for p in points]},
         )
 
-    def _execute_create(self, node: CreateCollectionStmt) -> ExecutionResult:
-        if self._client.collection_exists(node.collection):
+    async def _execute_create(self, node: CreateCollectionStmt) -> ExecutionResult:
+        if await self._client.collection_exists(node.collection):
             return ExecutionResult(
                 success=True,
                 message=f"Collection '{node.collection}' already exists",
@@ -501,7 +449,6 @@ class Executor:
 
         dense_model_name = node.model or self._config.default_model
 
-        # Build optional quantization config (None when QUANTIZE clause absent)
         quant_config = (
             self._build_quantization_config(node.quantization)
             if node.quantization is not None
@@ -522,7 +469,6 @@ class Executor:
             else None
         )
 
-        # ── Hybrid collection: named dense + sparse vectors ────────────────
         if node.hybrid:
             embedder = Embedder(dense_model_name)
             dims = embedder.dimensions
@@ -548,7 +494,7 @@ class Executor:
             if optimizers_config is not None:
                 create_kwargs["optimizers_config"] = optimizers_config
             create_kwargs.update(params_config)
-            self._create_collection_and_wait(**create_kwargs)
+            await self._create_collection_and_wait(**create_kwargs)
             return ExecutionResult(
                 success=True,
                 message=(
@@ -557,7 +503,6 @@ class Executor:
                 ),
             )
 
-        # ── Standard dense-only collection ─────────────────────────────────
         embedder = Embedder(dense_model_name)
         dims = embedder.dimensions
         dense_name = node.dense_vector or self._default_dense_vector_name()
@@ -578,16 +523,16 @@ class Executor:
         if optimizers_config is not None:
             create_kwargs["optimizers_config"] = optimizers_config
         create_kwargs.update(params_config)
-        self._create_collection_and_wait(**create_kwargs)
+        await self._create_collection_and_wait(**create_kwargs)
         return ExecutionResult(
             success=True,
             message=f"Collection '{node.collection}' created ({dims}-dimensional vectors, cosine distance{quant_label}{config_label})",
         )
 
-    def _execute_alter_collection(self, node: AlterCollectionStmt) -> ExecutionResult:
-        topology = self._resolve_topology(node.collection)
-        if not topology.exists:
+    async def _execute_alter_collection(self, node: AlterCollectionStmt) -> ExecutionResult:
+        if not await self._client.collection_exists(node.collection):
             raise QQLRuntimeError(f"Collection '{node.collection}' does not exist")
+        topology = await self._resolve_topology(node.collection)
 
         update_kwargs: dict[str, Any] = {"collection_name": node.collection}
         vectors_config = self._build_vectors_config_diff(topology, node.config)
@@ -608,7 +553,7 @@ class Executor:
             update_kwargs["quantization_config"] = quantization_config
 
         try:
-            self._client.update_collection(**update_kwargs)
+            await self._client.update_collection(**update_kwargs)
         except UnexpectedResponse as e:
             raise QQLRuntimeError(f"Qdrant error during ALTER COLLECTION: {e}") from e
 
@@ -621,8 +566,8 @@ class Executor:
             ),
         )
 
-    def _execute_create_index(self, node: CreateIndexStmt) -> ExecutionResult:
-        if not self._client.collection_exists(node.collection):
+    async def _execute_create_index(self, node: CreateIndexStmt) -> ExecutionResult:
+        if not await self._client.collection_exists(node.collection):
             raise QQLRuntimeError(f"Collection '{node.collection}' does not exist")
 
         schema_map = {
@@ -645,7 +590,7 @@ class Executor:
         field_schema = self._build_payload_index_schema(node)
 
         try:
-            self._client.create_payload_index(
+            await self._client.create_payload_index(
                 collection_name=node.collection,
                 field_name=node.field_name,
                 field_schema=field_schema,
@@ -661,17 +606,17 @@ class Executor:
             ),
         )
 
-    def _execute_drop(self, node: DropCollectionStmt) -> ExecutionResult:
-        if not self._client.collection_exists(node.collection):
+    async def _execute_drop(self, node: DropCollectionStmt) -> ExecutionResult:
+        if not await self._client.collection_exists(node.collection):
             raise QQLRuntimeError(f"Collection '{node.collection}' does not exist")
-        self._client.delete_collection(node.collection)
+        await self._client.delete_collection(node.collection)
         return ExecutionResult(
             success=True,
             message=f"Collection '{node.collection}' dropped",
         )
 
-    def _execute_show(self, node: ShowCollectionsStmt) -> ExecutionResult:
-        response = self._client.get_collections()
+    async def _execute_show(self, node: ShowCollectionsStmt) -> ExecutionResult:
+        response = await self._client.get_collections()
         names = [c.name for c in response.collections]
         return ExecutionResult(
             success=True,
@@ -679,14 +624,14 @@ class Executor:
             data=names,
         )
 
-    def _execute_show_collection(self, node: ShowCollectionStmt) -> ExecutionResult:
-        info = self._fetch_collection_info(node.collection)
-        if info is None:
+    async def _execute_show_collection(self, node: ShowCollectionStmt) -> ExecutionResult:
+        if not await self._client.collection_exists(node.collection):
             raise QQLRuntimeError(f"Collection '{node.collection}' does not exist")
+
+        info = await self._client.get_collection(node.collection)
         config = info.config
         params = config.params
 
-        # ── Vector topology ────────────────────────────────────────────────
         vectors = params.vectors  # type: ignore[union-attr]
         sparse_vector_params = params.sparse_vectors or {}
         if isinstance(vectors, dict):
@@ -711,7 +656,6 @@ class Executor:
             }
         topology = "hybrid" if sparse_vector_params else "dense"
 
-        # ── Sparse vector config ───────────────────────────────────────────
         sparse_vectors = {}
         if sparse_vector_params:
             for sname, sconfig in sparse_vector_params.items():
@@ -719,7 +663,6 @@ class Executor:
                     "modifier": str(sconfig.modifier) if sconfig.modifier else None,
                 }
 
-        # ── Quantization ───────────────────────────────────────────────────
         quant_config = config.quantization_config
         quantization = None
         if quant_config is not None:
@@ -735,7 +678,6 @@ class Executor:
             else:
                 quantization = qtype
 
-        # ── HNSW config ────────────────────────────────────────────────────
         hnsw = {
             "m": config.hnsw_config.m,
             "ef_construct": config.hnsw_config.ef_construct,
@@ -751,12 +693,10 @@ class Executor:
         if config.hnsw_config.inline_storage is not None:
             hnsw["inline_storage"] = config.hnsw_config.inline_storage
 
-        # ── Payload schema / indexes ───────────────────────────────────────
         payload_indexes = {}
         for field_name, idx_info in (info.payload_schema or {}).items():
             payload_indexes[field_name] = self._serialize_payload_index_info(idx_info)
 
-        # ── Sharding / replication ─────────────────────────────────────────
         sharding = {
             "shard_number": params.shard_number,
             "replication_factor": params.replication_factor,
@@ -787,8 +727,8 @@ class Executor:
             data=data,
         )
 
-    def _execute_scroll(self, node: ScrollStmt) -> ExecutionResult:
-        if not self._client.collection_exists(node.collection):
+    async def _execute_scroll(self, node: ScrollStmt) -> ExecutionResult:
+        if not await self._client.collection_exists(node.collection):
             raise QQLRuntimeError(f"Collection '{node.collection}' does not exist")
 
         scroll_filter: Filter | None = None
@@ -798,7 +738,7 @@ class Executor:
             )
 
         try:
-            records, next_offset = self._client.scroll(
+            records, next_offset = await self._client.scroll(
                 collection_name=node.collection,
                 scroll_filter=scroll_filter,
                 limit=node.limit,
@@ -819,12 +759,12 @@ class Executor:
             data={"points": points, "next_offset": next_offset},
         )
 
-    def _execute_select(self, node: SelectStmt) -> ExecutionResult:
-        if not self._client.collection_exists(node.collection):
+    async def _execute_select(self, node: SelectStmt) -> ExecutionResult:
+        if not await self._client.collection_exists(node.collection):
             raise QQLRuntimeError(f"Collection '{node.collection}' does not exist")
 
         try:
-            records = self._client.retrieve(
+            records = await self._client.retrieve(
                 collection_name=node.collection,
                 ids=[node.point_id],
                 with_payload=True,
@@ -846,12 +786,11 @@ class Executor:
             data={"id": str(record.id), "payload": record.payload or {}},
         )
 
-    def _execute_search(self, node: SearchStmt) -> ExecutionResult:
-        topology = self._resolve_topology(node.collection)
-        if not topology.exists:
+    async def _execute_search(self, node: SearchStmt) -> ExecutionResult:
+        if not await self._client.collection_exists(node.collection):
             raise QQLRuntimeError(f"Collection '{node.collection}' does not exist")
+        topology = await self._resolve_topology(node.collection)
 
-        # Build WHERE filter (shared by both hybrid and dense-only paths)
         qdrant_filter: Filter | None = None
         if node.query_filter is not None:
             qdrant_filter = self._wrap_as_filter(
@@ -861,8 +800,6 @@ class Executor:
         search_params = self._build_search_params(node.with_clause)
         validate_search_mmr_usage(node)
 
-        # When reranking is requested, fetch more candidates so the reranker has
-        # enough material to reorder; only `node.limit` results are returned.
         fetch_limit = node.limit * _RERANK_FETCH_MULTIPLIER if node.rerank else node.limit
 
         lookup_from: LookupLocation | None = None
@@ -872,22 +809,20 @@ class Executor:
                 vector=node.lookup_from[1],
             )
 
-        # ── GROUP BY SEARCH: delegate to query_points_groups() ─────────────
         if node.group_by is not None:
-            return self._execute_search_groups(
+            return await self._execute_search_groups(
                 node, qdrant_filter, search_params, topology
             )
 
-        # ── Hybrid SEARCH: prefetch dense+sparse, fuse with the requested strategy ──
         if node.hybrid:
             dense_model = node.model or self._config.default_model
             sparse_model_name = node.sparse_model or SparseEmbedder.DEFAULT_MODEL
-            dense_vector, sparse_vector = self._build_hybrid_vectors(
+            dense_vector, sparse_vector = await self._build_hybrid_vectors(
                 node.query_text, dense_model, sparse_model_name
             )
 
             try:
-                response = self._client.query_points(
+                response = await self._client.query_points(
                     collection_name=node.collection,
                     prefetch=[
                         Prefetch(
@@ -932,7 +867,6 @@ class Executor:
                 data=results,
             )
 
-        # ── Sparse-only SEARCH: query the selected sparse vector directly ───
         if node.sparse_only:
             sparse_model_name = node.sparse_model or SparseEmbedder.DEFAULT_MODEL
             sparse_embedder = SparseEmbedder(sparse_model_name)
@@ -943,7 +877,7 @@ class Executor:
             )
 
             try:
-                response = self._client.query_points(
+                response = await self._client.query_points(
                     collection_name=node.collection,
                     query=sparse_vector,
                     using=topology.sparse_using(node.sparse_vector),
@@ -976,14 +910,13 @@ class Executor:
                 data=results,
             )
 
-        # ── Standard dense-only SEARCH ─────────────────────────────────────
         model_name = node.model or self._config.default_model
         embedder = Embedder(model_name)
         vector = embedder.embed(node.query_text)
 
         try:
             query_using = topology.dense_using(node.dense_vector)
-            response = self._client.query_points(
+            response = await self._client.query_points(
                 collection_name=node.collection,
                 query=build_dense_query(vector, node.with_clause),
                 using=query_using,
@@ -1016,528 +949,28 @@ class Executor:
             data=results,
         )
 
-    def _build_hybrid_vectors(
-        self,
-        query_text: str,
-        dense_model: str,
-        sparse_model_name: str,
-    ) -> tuple[list[float], SparseVector]:
-        """Embed *query_text* with both dense and sparse models.
-
-        Returns ``(dense_vector, sparse_vector)`` — a plain Python list for
-        dense and a :class:`SparseVector` for sparse.  Extracted to eliminate
-        duplication between the flat-hybrid and grouped-hybrid paths.
-        """
-        dense_vector: list[float] = Embedder(dense_model).embed(query_text)
-        sparse_obj = SparseEmbedder(sparse_model_name).query_embed(query_text)
-        sparse_vector = SparseVector(
-            indices=sparse_obj["indices"],
-            values=sparse_obj["values"],
-        )
-        return dense_vector, sparse_vector
-
-    def _execute_recommend(self, node: RecommendStmt) -> ExecutionResult:
-        if not self._client.collection_exists(node.collection):
-            raise QQLRuntimeError(f"Collection '{node.collection}' does not exist")
-
-        qdrant_filter: Filter | None = None
-        if node.query_filter is not None:
-            qdrant_filter = self._wrap_as_filter(
-                self._build_qdrant_filter(node.query_filter)
-            )
-        qdrant_filter = exclude_ids_from_filter(
-            qdrant_filter,
-            [*node.positive_ids, *node.negative_ids],
-        )
-
-        recommend_input = RecommendInput(
-            positive=list(node.positive_ids),
-            negative=list(node.negative_ids) or None,
-            strategy=parse_recommend_strategy(node.strategy),
-        )
-
-        search_params = self._build_search_params(node.with_clause)
-        if has_mmr(node.with_clause):
-            raise QQLRuntimeError("MMR is supported only for SEARCH statements")
-
-        lookup_from: LookupLocation | None = None
-        if node.lookup_from is not None:
-            lookup_from = LookupLocation(
-                collection=node.lookup_from[0],
-                vector=node.lookup_from[1],
-            )
-
-        try:
-            response = self._client.query_points(
-                collection_name=node.collection,
-                query=RecommendQuery(recommend=recommend_input),
-                limit=node.limit,
-                offset=node.offset or None,
-                query_filter=qdrant_filter,
-                search_params=search_params,
-                score_threshold=node.score_threshold,
-                using=node.using,
-                lookup_from=lookup_from,
-            )
-        except UnexpectedResponse as e:
-            raise QQLRuntimeError(f"Qdrant error during RECOMMEND: {e}") from e
-
-        results = [
-            {"id": str(h.id), "score": round(h.score, 4), "payload": h.payload}
-            for h in response.points
-        ]
-
-        return ExecutionResult(
-            success=True,
-            message=f"Found {len(results)} recommendation(s)",
-            data=results,
-        )
-
-    def _build_payload_index_schema(self, node: CreateIndexStmt) -> Any:
-        options = node.options or {}
-        if node.schema == "keyword":
-            self._validate_index_option_keys(
-                node.schema,
-                options,
-                {"is_tenant", "on_disk", "enable_hnsw"},
-            )
-            if not options:
-                return PayloadSchemaType.KEYWORD
-            return KeywordIndexParams(
-                type=KeywordIndexType.KEYWORD,
-                is_tenant=self._index_bool_option(options, "is_tenant"),
-                on_disk=self._index_bool_option(options, "on_disk"),
-                enable_hnsw=self._index_bool_option(options, "enable_hnsw"),
-            )
-
-        if node.schema == "uuid":
-            self._validate_index_option_keys(
-                node.schema,
-                options,
-                {"is_tenant", "on_disk", "enable_hnsw"},
-            )
-            if not options:
-                return PayloadSchemaType.UUID
-            return UuidIndexParams(
-                type=UuidIndexType.UUID,
-                is_tenant=self._index_bool_option(options, "is_tenant"),
-                on_disk=self._index_bool_option(options, "on_disk"),
-                enable_hnsw=self._index_bool_option(options, "enable_hnsw"),
-            )
-
-        if node.schema == "text":
-            self._validate_index_option_keys(
-                node.schema,
-                options,
-                {
-                    "tokenizer",
-                    "min_token_len",
-                    "max_token_len",
-                    "lowercase",
-                    "ascii_folding",
-                    "phrase_matching",
-                    "stopwords",
-                    "on_disk",
-                    "enable_hnsw",
-                },
-            )
-            if not options:
-                return PayloadSchemaType.TEXT
-            min_token_len = self._index_int_option(options, "min_token_len")
-            max_token_len = self._index_int_option(options, "max_token_len")
-            if (
-                min_token_len is not None
-                and max_token_len is not None
-                and min_token_len > max_token_len
-            ):
-                raise QQLRuntimeError(
-                    "CREATE INDEX text option min_token_len cannot be greater than max_token_len"
-                )
-            return TextIndexParams(
-                type=TextIndexType.TEXT,
-                tokenizer=self._text_tokenizer_option(options),
-                min_token_len=min_token_len,
-                max_token_len=max_token_len,
-                lowercase=self._index_bool_option(options, "lowercase"),
-                ascii_folding=self._index_bool_option(options, "ascii_folding"),
-                phrase_matching=self._index_bool_option(options, "phrase_matching"),
-                stopwords=self._text_stopwords_option(options),
-                on_disk=self._index_bool_option(options, "on_disk"),
-                enable_hnsw=self._index_bool_option(options, "enable_hnsw"),
-            )
-
-        if options:
-            raise QQLRuntimeError(
-                f"CREATE INDEX type '{node.schema}' does not support advanced options yet"
-            )
-
-        schema_map = {
-            "keyword": PayloadSchemaType.KEYWORD,
-            "integer": PayloadSchemaType.INTEGER,
-            "float": PayloadSchemaType.FLOAT,
-            "bool": PayloadSchemaType.BOOL,
-            "text": PayloadSchemaType.TEXT,
-            "geo": PayloadSchemaType.GEO,
-            "datetime": PayloadSchemaType.DATETIME,
-            "uuid": PayloadSchemaType.UUID,
-        }
-        return schema_map[node.schema]
-
-    def _validate_index_option_keys(
-        self,
-        schema: str,
-        options: dict[str, Any],
-        allowed: set[str],
-    ) -> None:
-        unknown_keys = set(options) - allowed
-        if unknown_keys:
-            allowed_list = ", ".join(sorted(allowed))
-            raise QQLRuntimeError(
-                f"Unknown CREATE INDEX option '{sorted(unknown_keys)[0]}' for type '{schema}'. "
-                f"Expected one of: {allowed_list}"
-            )
-
-    def _index_bool_option(self, options: dict[str, Any], key: str) -> bool | None:
-        value = options.get(key)
-        if value is None:
-            return None
-        if not isinstance(value, bool):
-            raise QQLRuntimeError(f"CREATE INDEX option '{key}' must be a boolean")
-        return value
-
-    def _index_int_option(self, options: dict[str, Any], key: str) -> int | None:
-        value = options.get(key)
-        if value is None:
-            return None
-        if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
-            raise QQLRuntimeError(
-                f"CREATE INDEX option '{key}' must be a positive integer"
-            )
-        return value
-
-    def _text_tokenizer_option(self, options: dict[str, Any]) -> TokenizerType | None:
-        value = options.get("tokenizer")
-        if value is None:
-            return None
-        if not isinstance(value, str):
-            raise QQLRuntimeError("CREATE INDEX option 'tokenizer' must be a string")
-        tokenizer_map = {
-            "prefix": TokenizerType.PREFIX,
-            "whitespace": TokenizerType.WHITESPACE,
-            "word": TokenizerType.WORD,
-            "multilingual": TokenizerType.MULTILINGUAL,
-        }
-        try:
-            return tokenizer_map[value.lower()]
-        except KeyError as e:
-            raise QQLRuntimeError(
-                "CREATE INDEX option 'tokenizer' must be one of: "
-                "prefix, whitespace, word, multilingual"
-            ) from e
-
-    def _text_stopwords_option(
-        self, options: dict[str, Any]
-    ) -> Language | StopwordsSet | None:
-        value = options.get("stopwords")
-        if value is None:
-            return None
-        if isinstance(value, str):
-            try:
-                return Language(value.lower())
-            except ValueError as e:
-                raise QQLRuntimeError(
-                    "CREATE INDEX option 'stopwords' must be a known language name or a list of strings"
-                ) from e
-        if isinstance(value, list) and all(isinstance(item, str) for item in value):
-            return StopwordsSet(custom=value)
-        raise QQLRuntimeError(
-            "CREATE INDEX option 'stopwords' must be a string language name or a list of strings"
-        )
-
-    def _serialize_payload_index_info(self, idx_info: Any) -> dict[str, Any]:
-        params = idx_info.params
-        data = {"type": str(idx_info.data_type)}
-        if params is None or not hasattr(params, "model_dump"):
-            return data
-        details: dict[str, Any] = {}
-        for key, value in params.model_dump(exclude_none=True).items():
-            if key == "type":
-                continue
-            details[key] = self._serialize_payload_index_value(value)
-        if details:
-            data["params"] = details
-        return data
-
-    def _serialize_payload_index_value(self, value: Any) -> Any:
-        if hasattr(value, "value"):
-            return value.value
-        if isinstance(value, dict):
-            return {
-                key: self._serialize_payload_index_value(item)
-                for key, item in value.items()
-            }
-        if isinstance(value, list):
-            return [self._serialize_payload_index_value(item) for item in value]
-        return value
-
-    def _build_search_params(self, with_clause: SearchWith | None) -> SearchParams | None:
-        if with_clause is None:
-            return None
-        quantization = None
-        if with_clause.quantization is not None:
-            quantization = QuantizationSearchParams(
-                ignore=with_clause.quantization.ignore,
-                rescore=with_clause.quantization.rescore,
-                oversampling=with_clause.quantization.oversampling,
-            )
-        return SearchParams(
-            hnsw_ef=with_clause.hnsw_ef,
-            exact=with_clause.exact,
-            quantization=quantization,
-            indexed_only=True if with_clause.indexed_only else None,
-            acorn=AcornSearchParams(enable=True) if with_clause.acorn else None,
-        )
-
-    def _build_hnsw_config(self, config: CollectionConfig | None) -> HnswConfigDiff | None:
-        if config is None or config.hnsw is None:
-            return None
-        hnsw = config.hnsw
-        return HnswConfigDiff(
-            m=hnsw.m,
-            ef_construct=hnsw.ef_construct,
-            full_scan_threshold=hnsw.full_scan_threshold,
-            max_indexing_threads=hnsw.max_indexing_threads,
-            on_disk=hnsw.on_disk,
-            payload_m=hnsw.payload_m,
-            inline_storage=hnsw.inline_storage,
-        )
-
-    def _build_optimizers_config(
-        self,
-        config: CollectionConfig | None,
-    ) -> OptimizersConfigDiff | None:
-        if config is None or config.optimizers is None:
-            return None
-        optimizers = config.optimizers
-        max_optimization_threads = optimizers.max_optimization_threads
-        if max_optimization_threads == "auto":
-            max_optimization_threads = MaxOptimizationThreadsSetting.AUTO
-        return OptimizersConfigDiff(
-            deleted_threshold=optimizers.deleted_threshold,
-            vacuum_min_vector_number=optimizers.vacuum_min_vector_number,
-            default_segment_number=optimizers.default_segment_number,
-            max_segment_size=optimizers.max_segment_size,
-            memmap_threshold=optimizers.memmap_threshold,
-            indexing_threshold=optimizers.indexing_threshold,
-            flush_interval_sec=optimizers.flush_interval_sec,
-            max_optimization_threads=max_optimization_threads,
-            prevent_unoptimized=optimizers.prevent_unoptimized,
-        )
-
-    def _build_collection_params_create_kwargs(
-        self,
-        config: CollectionConfig | None,
-    ) -> dict[str, Any]:
-        if config is None or config.params is None:
-            return {}
-        params = config.params
-        create_kwargs: dict[str, Any] = {}
-        if params.replication_factor is not None:
-            create_kwargs["replication_factor"] = params.replication_factor
-        if params.write_consistency_factor is not None:
-            create_kwargs["write_consistency_factor"] = params.write_consistency_factor
-        if params.on_disk_payload is not None:
-            create_kwargs["on_disk_payload"] = params.on_disk_payload
-        return create_kwargs
-
-    def _build_collection_params_diff(
-        self,
-        config: CollectionConfig | None,
-    ) -> CollectionParamsDiff | None:
-        if config is None or config.params is None:
-            return None
-        params = config.params
-        return CollectionParamsDiff(
-            replication_factor=params.replication_factor,
-            write_consistency_factor=params.write_consistency_factor,
-            read_fan_out_factor=params.read_fan_out_factor,
-            read_fan_out_delay_ms=params.read_fan_out_delay_ms,
-            on_disk_payload=params.on_disk_payload,
-        )
-
-    def _build_vectors_config_diff(
-        self,
-        topology: CollectionTopology,
-        config: CollectionConfig | None,
-    ) -> dict[str, VectorParamsDiff] | None:
-        if config is None or config.vectors is None:
-            return None
-        try:
-            vector_name = topology.dense_config_key()
-        except QQLRuntimeError as e:
-            if "multiple dense vectors" in str(e):
-                raise QQLRuntimeError(
-                    "ALTER COLLECTION WITH VECTORS requires a collection with one dense vector"
-                ) from e
-            raise
-        return {
-            vector_name: VectorParamsDiff(on_disk=config.vectors.on_disk),
-        }
-
-    def _build_alter_quantization_config(
-        self,
-        quantization: QuantizationUpdate | None,
-    ) -> (
-        ScalarQuantization | BinaryQuantization | ProductQuantization | TurboQuantization | Disabled | None
-    ):
-        if quantization is None:
-            return None
-        if quantization.disabled:
-            return Disabled.DISABLED
-        if quantization.config is None:
-            return None
-        return self._build_quantization_config(quantization.config)
-
-    def _describe_collection_config(self, config: CollectionConfig | None) -> str:
-        if config is None:
-            return ""
-        labels: list[str] = []
-        if config.vectors is not None and config.vectors.on_disk is not None:
-            labels.append(f"vectors.on_disk={config.vectors.on_disk}")
-        if config.hnsw is not None:
-            hnsw = config.hnsw
-            if hnsw.m is not None:
-                labels.append(f"hnsw.m={hnsw.m}")
-            if hnsw.ef_construct is not None:
-                labels.append(f"hnsw.ef_construct={hnsw.ef_construct}")
-            if hnsw.full_scan_threshold is not None:
-                labels.append(f"hnsw.full_scan_threshold={hnsw.full_scan_threshold}")
-            if hnsw.max_indexing_threads is not None:
-                labels.append(f"hnsw.max_indexing_threads={hnsw.max_indexing_threads}")
-            if hnsw.on_disk is not None:
-                labels.append(f"hnsw.on_disk={hnsw.on_disk}")
-            if hnsw.payload_m is not None:
-                labels.append(f"hnsw.payload_m={hnsw.payload_m}")
-            if hnsw.inline_storage is not None:
-                labels.append(f"hnsw.inline_storage={hnsw.inline_storage}")
-        if config.optimizers is not None:
-            optimizers = config.optimizers
-            for key in (
-                "deleted_threshold",
-                "vacuum_min_vector_number",
-                "default_segment_number",
-                "max_segment_size",
-                "memmap_threshold",
-                "indexing_threshold",
-                "flush_interval_sec",
-                "max_optimization_threads",
-                "prevent_unoptimized",
-            ):
-                value = getattr(optimizers, key)
-                if value is not None:
-                    labels.append(f"optimizers.{key}={value}")
-        if config.params is not None:
-            params = config.params
-            for key in (
-                "replication_factor",
-                "write_consistency_factor",
-                "read_fan_out_factor",
-                "read_fan_out_delay_ms",
-                "on_disk_payload",
-            ):
-                value = getattr(params, key)
-                if value is not None:
-                    labels.append(f"params.{key}={value}")
-        return f", {', '.join(labels)}" if labels else ""
-
-    def _describe_quantization_update(
-        self,
-        quantization: QuantizationUpdate | None,
-    ) -> str:
-        if quantization is None:
-            return ""
-        if quantization.disabled:
-            return ", quantization=disabled"
-        if quantization.config is not None:
-            return f", quantization={quantization.config.type.value}"
-        return ""
-
-    def _apply_reranking(
-        self,
-        query: str,
-        results: list[dict],
-        limit: int,
-        rerank_model: str | None,
-    ) -> list[dict]:
-        """Re-score candidates with a cross-encoder and return top-``limit`` results."""
-        model_name = rerank_model or CrossEncoderEmbedder.DEFAULT_MODEL
-        reranker = CrossEncoderEmbedder(model_name)
-        texts = [r["payload"].get("text", "") for r in results]
-        scores = reranker.rerank(query, texts)
-        for r, s in zip(results, scores):
-            r["score"] = round(float(s), 4)
-        return sorted(results, key=lambda r: r["score"], reverse=True)[:limit]
-
-    def _execute_delete(self, node: DeleteStmt) -> ExecutionResult:
-        if not self._client.collection_exists(node.collection):
-            raise QQLRuntimeError(f"Collection '{node.collection}' does not exist")
-
-        try:
-            if node.query_filter is not None:
-                self._client.delete(
-                    collection_name=node.collection,
-                    wait=True,
-                    points_selector=self._wrap_as_filter(
-                        self._build_qdrant_filter(node.query_filter)
-                    ),
-                )
-                return ExecutionResult(
-                    success=True,
-                    message=f"Deleted points from '{node.collection}' by filter",
-                )
-
-            from qdrant_client.models import PointIdsList
-
-            if node.point_id is None:
-                raise QQLRuntimeError("DELETE requires either a point id or a filter")
-
-            self._client.delete(
-                collection_name=node.collection,
-                wait=True,
-                points_selector=PointIdsList(points=[node.point_id]),
-            )
-        except UnexpectedResponse as e:
-            raise QQLRuntimeError(f"Qdrant error during DELETE: {e}") from e
-
-        return ExecutionResult(
-            success=True,
-            message=f"Deleted point '{node.point_id}' from '{node.collection}'",
-        )
-
-    def _execute_search_groups(
+    async def _execute_search_groups(
         self,
         node: SearchStmt,
         qdrant_filter: Filter | None,
         search_params: SearchParams | None,
         topology: CollectionTopology,
     ) -> ExecutionResult:
-        """Execute SEARCH ... GROUP BY using query_points_groups()."""
-        
         lookup_from: LookupLocation | None = None
         if node.lookup_from is not None:
             lookup_from = LookupLocation(
                 collection=node.lookup_from[0],
                 vector=node.lookup_from[1],
             )
-            
+
         try:
             if node.hybrid:
                 dense_model = node.model or self._config.default_model
                 sparse_model_name = node.sparse_model or SparseEmbedder.DEFAULT_MODEL
-                dense_vector, sparse_vector = self._build_hybrid_vectors(
+                dense_vector, sparse_vector = await self._build_hybrid_vectors(
                     node.query_text, dense_model, sparse_model_name
                 )
-                response = self._client.query_points_groups(
+                response = await self._client.query_points_groups(
                     collection_name=node.collection,
                     group_by=node.group_by,
                     prefetch=[
@@ -1569,7 +1002,7 @@ class Executor:
                     indices=sparse_obj["indices"],
                     values=sparse_obj["values"],
                 )
-                response = self._client.query_points_groups(
+                response = await self._client.query_points_groups(
                     collection_name=node.collection,
                     group_by=node.group_by,
                     query=sparse_vector,
@@ -1586,7 +1019,7 @@ class Executor:
                 model_name = node.model or self._config.default_model
                 vector = Embedder(model_name).embed(node.query_text)
                 query_using = topology.dense_using(node.dense_vector)
-                response = self._client.query_points_groups(
+                response = await self._client.query_points_groups(
                     collection_name=node.collection,
                     group_by=node.group_by,
                     query=build_dense_query(vector, node.with_clause),
@@ -1618,17 +1051,109 @@ class Executor:
             data=groups,
         )
 
-    def _execute_update_vector(self, node: UpdateVectorStmt) -> ExecutionResult:
-        """Execute UPDATE ... SET VECTOR using update_vectors()."""
-        topology = self._resolve_topology(node.collection)
-        if not topology.exists:
+    async def _execute_recommend(self, node: RecommendStmt) -> ExecutionResult:
+        if not await self._client.collection_exists(node.collection):
             raise QQLRuntimeError(f"Collection '{node.collection}' does not exist")
+
+        qdrant_filter: Filter | None = None
+        if node.query_filter is not None:
+            qdrant_filter = self._wrap_as_filter(
+                self._build_qdrant_filter(node.query_filter)
+            )
+        qdrant_filter = exclude_ids_from_filter(
+            qdrant_filter,
+            [*node.positive_ids, *node.negative_ids],
+        )
+
+        recommend_input = RecommendInput(
+            positive=list(node.positive_ids),
+            negative=list(node.negative_ids) or None,
+            strategy=parse_recommend_strategy(node.strategy),
+        )
+
+        search_params = self._build_search_params(node.with_clause)
+        if has_mmr(node.with_clause):
+            raise QQLRuntimeError("MMR is supported only for SEARCH statements")
+
+        lookup_from: LookupLocation | None = None
+        if node.lookup_from is not None:
+            lookup_from = LookupLocation(
+                collection=node.lookup_from[0],
+                vector=node.lookup_from[1],
+            )
+
+        try:
+            response = await self._client.query_points(
+                collection_name=node.collection,
+                query=RecommendQuery(recommend=recommend_input),
+                limit=node.limit,
+                offset=node.offset or None,
+                query_filter=qdrant_filter,
+                search_params=search_params,
+                score_threshold=node.score_threshold,
+                using=node.using,
+                lookup_from=lookup_from,
+            )
+        except UnexpectedResponse as e:
+            raise QQLRuntimeError(f"Qdrant error during RECOMMEND: {e}") from e
+
+        results = [
+            {"id": str(h.id), "score": round(h.score, 4), "payload": h.payload}
+            for h in response.points
+        ]
+
+        return ExecutionResult(
+            success=True,
+            message=f"Found {len(results)} recommendation(s)",
+            data=results,
+        )
+
+    async def _execute_delete(self, node: DeleteStmt) -> ExecutionResult:
+        if not await self._client.collection_exists(node.collection):
+            raise QQLRuntimeError(f"Collection '{node.collection}' does not exist")
+
+        try:
+            if node.query_filter is not None:
+                await self._client.delete(
+                    collection_name=node.collection,
+                    wait=True,
+                    points_selector=self._wrap_as_filter(
+                        self._build_qdrant_filter(node.query_filter)
+                    ),
+                )
+                return ExecutionResult(
+                    success=True,
+                    message=f"Deleted points from '{node.collection}' by filter",
+                )
+
+            from qdrant_client.models import PointIdsList
+
+            if node.point_id is None:
+                raise QQLRuntimeError("DELETE requires either a point id or a filter")
+
+            await self._client.delete(
+                collection_name=node.collection,
+                wait=True,
+                points_selector=PointIdsList(points=[node.point_id]),
+            )
+        except UnexpectedResponse as e:
+            raise QQLRuntimeError(f"Qdrant error during DELETE: {e}") from e
+
+        return ExecutionResult(
+            success=True,
+            message=f"Deleted point '{node.point_id}' from '{node.collection}'",
+        )
+
+    async def _execute_update_vector(self, node: UpdateVectorStmt) -> ExecutionResult:
+        if not await self._client.collection_exists(node.collection):
+            raise QQLRuntimeError(f"Collection '{node.collection}' does not exist")
+        topology = await self._resolve_topology(node.collection)
         vector_name = topology.dense_payload_name(node.vector_name)
         vector_struct: Any = (
             {vector_name: list(node.vector)} if vector_name else list(node.vector)
         )
         try:
-            self._client.update_vectors(
+            await self._client.update_vectors(
                 collection_name=node.collection,
                 points=[PointVectors(id=node.point_id, vector=vector_struct)],
                 wait=True,
@@ -1641,16 +1166,15 @@ class Executor:
             data=[],
         )
 
-    def _execute_update_payload(self, node: UpdatePayloadStmt) -> ExecutionResult:
-        """Execute UPDATE ... SET PAYLOAD using set_payload()."""
-        if not self._client.collection_exists(node.collection):
+    async def _execute_update_payload(self, node: UpdatePayloadStmt) -> ExecutionResult:
+        if not await self._client.collection_exists(node.collection):
             raise QQLRuntimeError(f"Collection '{node.collection}' does not exist")
         try:
             if node.query_filter is not None:
                 qdrant_filter = self._wrap_as_filter(
                     self._build_qdrant_filter(node.query_filter)
                 )
-                self._client.set_payload(
+                await self._client.set_payload(
                     collection_name=node.collection,
                     payload=node.payload,
                     points=qdrant_filter,
@@ -1661,7 +1185,7 @@ class Executor:
                     message=f"Payload updated in '{node.collection}' (filter-based)",
                     data=[],
                 )
-            self._client.set_payload(
+            await self._client.set_payload(
                 collection_name=node.collection,
                 payload=node.payload,
                 points=[node.point_id],
@@ -1675,16 +1199,16 @@ class Executor:
             data=[],
         )
 
-    def _execute_batch_block(self, node: BatchBlockStmt) -> ExecutionResult:
+    async def _execute_batch_block(self, node: BatchBlockStmt) -> ExecutionResult:
         if not node.statements:
             return ExecutionResult(success=True, message="Executed empty batch", data=[])
-            
+
         all_results = []
         succeeded_count = 0
-        
+
         for group in group_batch_statements(node.statements):
             if group.kind == 'query':
-                res = self._execute_query_batch(group.collection, group.statements)
+                res = await self._execute_query_batch(group.collection, group.statements)
                 all_results.extend(res)
                 succeeded_count += len([r for r in res if r.success])
             elif group.kind == 'insert':
@@ -1692,7 +1216,7 @@ class Executor:
                     group.collection,
                     group.statements,
                 )
-                res = self._execute_insert_bulk(bulk_node)
+                res = await self._execute_insert_bulk(bulk_node)
                 insert_results = inserted_point_results(
                     res,
                     group.statements,
@@ -1702,11 +1226,11 @@ class Executor:
                 succeeded_count += len([r for r in insert_results if r.success])
             else:
                 for s in group.statements:
-                    res = self.execute(s)
+                    res = await self.execute(s)
                     all_results.append(res)
                     if res.success:
                         succeeded_count += 1
-                        
+
         total_stmts = len(node.statements)
         return ExecutionResult(
             success=succeeded_count == total_stmts,
@@ -1714,44 +1238,44 @@ class Executor:
             data=all_results,
         )
 
-    def _execute_query_batch(
+    async def _execute_query_batch(
         self,
         collection_name: str,
         nodes: list[SearchStmt | RecommendStmt],
     ) -> list[ExecutionResult]:
-        if not self._client.collection_exists(collection_name):
+        if not await self._client.collection_exists(collection_name):
             raise QQLRuntimeError(f"Collection '{collection_name}' does not exist")
-        
-        topology = self._resolve_topology(collection_name)
+
+        topology = await self._resolve_topology(collection_name)
         requests = []
-        
+
         for node in nodes:
             qdrant_filter = None
             if node.query_filter is not None:
                 qdrant_filter = self._wrap_as_filter(
                     self._build_qdrant_filter(node.query_filter)
                 )
-            
+
             search_params = self._build_search_params(node.with_clause)
-            
+
             lookup_from = None
             if node.lookup_from is not None:
                 lookup_from = LookupLocation(
                     collection=node.lookup_from[0],
                     vector=node.lookup_from[1],
                 )
-            
+
             if isinstance(node, SearchStmt):
                 validate_search_mmr_usage(node)
                 fetch_limit = node.limit * _RERANK_FETCH_MULTIPLIER if node.rerank else node.limit
-                
+
                 if node.hybrid:
                     dense_model = node.model or self._config.default_model
                     sparse_model_name = node.sparse_model or SparseEmbedder.DEFAULT_MODEL
-                    dense_vector, sparse_vector = self._build_hybrid_vectors(
+                    dense_vector, sparse_vector = await self._build_hybrid_vectors(
                         node.query_text, dense_model, sparse_model_name
                     )
-                    
+
                     req = QueryRequest(
                         prefetch=[
                             Prefetch(
@@ -1784,7 +1308,7 @@ class Executor:
                         indices=sparse_obj["indices"],
                         values=sparse_obj["values"],
                     )
-                    
+
                     req = QueryRequest(
                         query=sparse_vector,
                         using=topology.sparse_using(node.sparse_vector),
@@ -1802,7 +1326,7 @@ class Executor:
                     embedder = Embedder(model_name)
                     vector = embedder.embed(node.query_text)
                     query_using = topology.dense_using(node.dense_vector)
-                    
+
                     req = QueryRequest(
                         query=build_dense_query(vector, node.with_clause),
                         using=query_using,
@@ -1827,7 +1351,7 @@ class Executor:
                 )
                 if has_mmr(node.with_clause):
                     raise QQLRuntimeError("MMR is supported only for SEARCH statements")
-                
+
                 req = QueryRequest(
                     query=RecommendQuery(recommend=recommend_input),
                     limit=node.limit,
@@ -1840,17 +1364,17 @@ class Executor:
                     with_payload=True,
                     with_vector=False,
                 )
-                
+
             requests.append(req)
-            
+
         try:
-            responses = self._client.query_batch_points(
+            responses = await self._client.query_batch_points(
                 collection_name=collection_name,
                 requests=requests,
             )
         except UnexpectedResponse as e:
             raise QQLRuntimeError(f"Qdrant error during Batch Query: {e}") from e
-            
+
         execution_results = []
         for i, response in enumerate(responses):
             node = nodes[i]
@@ -1858,7 +1382,7 @@ class Executor:
                 {"id": str(h.id), "score": round(h.score, 4), "payload": h.payload}
                 for h in response.points
             ]
-            
+
             if isinstance(node, SearchStmt) and node.rerank:
                 results = self._apply_reranking(node.query_text, results, node.limit, node.rerank_model)
                 label = "hybrid, reranked" if node.hybrid else ("sparse, reranked" if node.sparse_only else "reranked")
@@ -1870,134 +1394,9 @@ class Executor:
                     msg = f"Found {len(results)} result(s){label_suffix}"
                 else:
                     msg = f"Found {len(results)} recommendation(s)"
-                    
+
             execution_results.append(
                 ExecutionResult(success=True, message=msg, data=results)
             )
-            
+
         return execution_results
-
-    # ── Filter conversion ─────────────────────────────────────────────────
-
-    def _build_qdrant_filter(self, expr: FilterExpr) -> Any:
-        """Convert a FilterExpr AST node into a Qdrant model object.
-
-        Returns one of: Filter, FieldCondition, IsNullCondition, IsEmptyCondition.
-        Use _wrap_as_filter() to guarantee the top-level result is a Filter.
-        """
-        return build_qdrant_filter(expr)
-
-    def _wrap_as_filter(self, qdrant_expr: Any) -> Filter:
-        """Ensure the top-level expression is a Filter (required by query_points)."""
-        return wrap_as_filter(qdrant_expr)
-
-    # ── Collection helpers ────────────────────────────────────────────────
-
-    def _build_quantization_config(
-        self, qc: QuantizationConfig
-    ) -> ScalarQuantization | BinaryQuantization | ProductQuantization | TurboQuantization:
-        """Convert a parsed QuantizationConfig to a Qdrant SDK quantization object."""
-        if qc.type == QuantizationType.SCALAR:
-            return ScalarQuantization(
-                scalar=ScalarQuantizationConfig(
-                    type=ScalarType.INT8,
-                    quantile=qc.quantile,      # None → SDK uses its own default (0.99)
-                    always_ram=qc.always_ram,
-                )
-            )
-        if qc.type == QuantizationType.BINARY:
-            return BinaryQuantization(
-                binary=BinaryQuantizationConfig(always_ram=qc.always_ram)
-            )
-        if qc.type == QuantizationType.PRODUCT:
-            return ProductQuantization(
-                product=ProductQuantizationConfig(
-                    compression=CompressionRatio.X4,
-                    always_ram=qc.always_ram,
-                )
-            )
-        if qc.type == QuantizationType.TURBO:
-            _BITS_MAP: dict[float, TurboQuantBitSize] = {
-                4.0: TurboQuantBitSize.BITS4,
-                2.0: TurboQuantBitSize.BITS2,
-                1.5: TurboQuantBitSize.BITS1_5,
-                1.0: TurboQuantBitSize.BITS1,
-            }
-            if qc.turbo_bits is None:
-                bits_enum = None           # user omitted BITS → preserve None, server applies default
-            elif qc.turbo_bits in _BITS_MAP:
-                bits_enum = _BITS_MAP[qc.turbo_bits]
-            else:
-                raise QQLRuntimeError(
-                    f"Unsupported TURBO bit depth: {qc.turbo_bits}. "
-                    f"Valid values: 1, 1.5, 2, 4"
-                )
-            return TurboQuantization(
-                turbo=TurboQuantQuantizationConfig(
-                    bits=bits_enum,
-                    always_ram=qc.always_ram,
-                )
-            )
-        raise QQLRuntimeError(f"Unknown quantization type: {qc.type}")
-
-    def _ensure_collection(
-        self,
-        name: str,
-        vector_size: int,
-        topology: CollectionTopology,
-        explicit_vector: str | None,
-    ) -> None:
-        """Create the collection if needed, or validate dimension compatibility.
-
-        QQL-created dense collections use the configured dense vector name.
-        Externally created unnamed collections still accept plain dense vectors.
-        All validation is done against pre-fetched ``topology`` data; no extra
-        Qdrant API calls are made.
-        """
-        if topology.exists:
-            sizes = topology.dense_size_map()
-            if topology.is_named_dense:
-                # dense_using() raises QQLRuntimeError on bad/ambiguous names,
-                # and always returns a non-None string in the named-dense branch.
-                vector_name = topology.dense_using(explicit_vector)
-                expected_size = sizes.get(vector_name)  # type: ignore[arg-type]
-                if expected_size is not None and expected_size != vector_size:
-                    raise QQLRuntimeError(
-                        f"Vector dimension mismatch: collection '{name}' vector "
-                        f"'{vector_name}' expects {expected_size} dims, but "
-                        f"model produces {vector_size} dims. Specify a compatible "
-                        "model with USING MODEL '<model>'."
-                    )
-            elif topology.has_unnamed_dense:
-                expected_size = sizes.get("")
-                if expected_size is not None and expected_size != vector_size:
-                    raise QQLRuntimeError(
-                        f"Vector dimension mismatch: collection '{name}' expects "
-                        f"{expected_size} dims, but model produces {vector_size} dims. "
-                        f"Specify a compatible model with USING MODEL '<model>'."
-                    )
-            else:
-                raise QQLRuntimeError("Collection has no dense vector")
-        else:
-            self._create_collection_and_wait(
-                collection_name=name,
-                vectors_config={
-                    explicit_vector or self._default_dense_vector_name(): VectorParams(
-                        size=vector_size, distance=Distance.COSINE
-                    )
-                },
-            )
-
-    def _create_collection_and_wait(self, **kwargs: Any) -> None:
-        collection_name = kwargs["collection_name"]
-        self._client.create_collection(**kwargs)
-
-        deadline = time.monotonic() + _COLLECTION_VISIBILITY_TIMEOUT_SECONDS
-        while time.monotonic() < deadline:
-            if self._client.collection_exists(collection_name):
-                return
-            time.sleep(_COLLECTION_VISIBILITY_POLL_SECONDS)
-
-        raise QQLRuntimeError(
-            f"Collection '{collection_name}' was created but did not become visible in time"
-        )

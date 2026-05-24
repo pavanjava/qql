@@ -191,3 +191,107 @@ class TestRunQueryBackwardCompat:
         mocker.patch("qdrant_client.QdrantClient")
         with pytest.raises(QQLSyntaxError):
             run_query("TOTALLY INVALID", url="http://localhost:6333")
+
+
+# ── TestConnectionBatching ───────────────────────────────────────────────────
+
+class TestConnectionBatching:
+    """Connection batching functionality: prefer_grpc, QQLBatch, parameterized run."""
+
+    def test_prefer_grpc_passed_to_qdrant_client(self, mocker):
+        mock_client_cls = mocker.patch("qdrant_client.QdrantClient")
+        Connection("http://localhost:6333", prefer_grpc=True, grpc_port=9999)
+        mock_client_cls.assert_called_once_with(
+            url="http://localhost:6333", api_key=None, prefer_grpc=True, grpc_port=9999
+        )
+
+    def test_run_queries_batch_pipes_to_executor(self, mocker):
+        mocker.patch("qdrant_client.QdrantClient")
+        mock_executor = mocker.MagicMock()
+        mock_executor.execute.return_value = ExecutionResult(
+            success=True, message="ok", data=[
+                ExecutionResult(success=True, message="ok1", data="res1"),
+                ExecutionResult(success=True, message="ok2", data="res2")
+            ]
+        )
+        mocker.patch("qql.connection.Executor", return_value=mock_executor)
+
+        conn = Connection()
+        results = conn.run_queries_batch([
+            "SHOW COLLECTIONS",
+            "SHOW COLLECTIONS"
+        ])
+        assert len(results) == 2
+        assert results[0].data == "res1"
+        assert results[1].data == "res2"
+        mock_executor.execute.assert_called_once()
+
+    def test_run_parameterized_batch_substitutes_vars(self, mocker):
+        mocker.patch("qdrant_client.QdrantClient")
+        mock_executor = mocker.MagicMock()
+        mock_executor.execute.return_value = ExecutionResult(
+            success=True, message="ok", data=[
+                ExecutionResult(success=True, message="ok1", data="res1"),
+                ExecutionResult(success=True, message="ok2", data="res2")
+            ]
+        )
+        mocker.patch("qql.connection.Executor", return_value=mock_executor)
+
+        conn = Connection()
+        results = conn.run_parameterized_batch(
+            "SEARCH docs SIMILAR TO :query LIMIT :limit WHERE category = :cat",
+            [
+                {"query": "ML", "limit": 5, "cat": "news"},
+                {"query": "AI", "limit": 10, "cat": "tech"}
+            ]
+        )
+        assert len(results) == 2
+        # Check that AST was called with reconstructed strings
+        called_node = mock_executor.execute.call_args[0][0]
+        # In BatchBlockStmt, statements should contain substituted strings
+        assert called_node.statements[0].query_text == "ML"
+        assert called_node.statements[0].limit == 5
+        assert called_node.statements[1].query_text == "AI"
+        assert called_node.statements[1].limit == 10
+
+    def test_run_parameterized_query_substitutes_vars(self, mocker):
+        mocker.patch("qdrant_client.QdrantClient")
+        mock_executor = mocker.MagicMock()
+        mock_executor.execute.return_value = ExecutionResult(
+            success=True, message="ok", data="res1"
+        )
+        mocker.patch("qql.connection.Executor", return_value=mock_executor)
+
+        conn = Connection()
+        result = conn.run_parameterized_query(
+            "SEARCH docs SIMILAR TO :query LIMIT :limit WHERE category = :cat",
+            {"query": "ML", "limit": 5, "cat": "news"},
+        )
+
+        called_node = mock_executor.execute.call_args[0][0]
+        assert result.data == "res1"
+        assert called_node.query_text == "ML"
+        assert called_node.limit == 5
+
+    def test_qql_batch_context_manager(self, mocker):
+        mocker.patch("qdrant_client.QdrantClient")
+        mock_executor = mocker.MagicMock()
+        mock_executor.execute.return_value = ExecutionResult(
+            success=True, message="ok", data=[
+                ExecutionResult(success=True, message="ok1", data="res1"),
+                ExecutionResult(success=True, message="ok2", data="res2")
+            ]
+        )
+        mocker.patch("qql.connection.Executor", return_value=mock_executor)
+
+        from qql import QQLBatch
+        conn = Connection()
+        with QQLBatch(conn) as batch:
+            p1 = batch.add("SHOW COLLECTIONS")
+            p2 = batch.add("SHOW COLLECTIONS")
+            with pytest.raises(RuntimeError):
+                p1.result
+
+        assert p1.result.data == "res1"
+        assert p2.result.data == "res2"
+        mock_executor.execute.assert_called_once()

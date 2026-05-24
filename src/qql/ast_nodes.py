@@ -340,6 +340,11 @@ class UpdatePayloadStmt:
     query_filter: FilterExpr | None = None
 
 
+@dataclass(frozen=True)
+class BatchBlockStmt:
+    statements: tuple[ASTNode, ...]
+
+
 # Union type for all top-level statement nodes
 ASTNode = (
     InsertStmt
@@ -357,4 +362,5 @@ ASTNode = (
     | DeleteStmt
     | UpdateVectorStmt
     | UpdatePayloadStmt
+    | BatchBlockStmt
 )

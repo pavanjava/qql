@@ -71,6 +71,10 @@ class TokenKind(Enum):
     UPDATE     = auto()
     SET        = auto()
     PAYLOAD    = auto()
+    # ── Batch keywords ────────────────────────────────────────────────────
+    BEGIN      = auto()
+    BATCH      = auto()
+    END        = auto()
     # ── Filter keywords ───────────────────────────────────────────────────
     AND = auto()
     OR = auto()
@@ -99,6 +103,7 @@ class TokenKind(Enum):
     COLON = auto()
     COMMA = auto()
     EQUALS = auto()
+    SEMICOLON = auto()
     # ── Comparison operators ──────────────────────────────────────────────
     NOT_EQUALS = auto()  # !=
     GT = auto()  # >
@@ -176,6 +181,9 @@ _KEYWORDS: dict[str, TokenKind] = {
     "UPDATE":     TokenKind.UPDATE,
     "SET":        TokenKind.SET,
     "PAYLOAD":    TokenKind.PAYLOAD,
+    "BEGIN":      TokenKind.BEGIN,
+    "BATCH":      TokenKind.BATCH,
+    "END":        TokenKind.END,
     # Filter keywords
     "AND": TokenKind.AND,
     "OR": TokenKind.OR,
@@ -238,6 +246,9 @@ class Lexer:
                 i += 1
             elif ch == ",":
                 tokens.append(Token(TokenKind.COMMA, ",", i))
+                i += 1
+            elif ch == ";":
+                tokens.append(Token(TokenKind.SEMICOLON, ";", i))
                 i += 1
 
             # ── Comparison operators (multi-char look-ahead) ──────────────
