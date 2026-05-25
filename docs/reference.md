@@ -171,7 +171,7 @@ Both sync and async connections support:
 
 ## Project Structure
 
-```
+```text
 qql/
 ├── pyproject.toml          # Package config; installs the `qql` CLI command
 ├── src/

@@ -190,8 +190,16 @@ class QQLAsyncBatch:
         if not self._queries:
             return
         results = await self.connection.run_queries_batch(self._queries)
-        for proxy, res in zip(self._proxies, results):
+        for proxy, res in zip(self._proxies, results, strict=False):
             proxy._resolve(res)
+        if len(results) != len(self._proxies):
+            error = RuntimeError(
+                "Batch result count mismatch: "
+                f"expected {len(self._proxies)}, got {len(results)}"
+            )
+            for proxy in self._proxies[len(results):]:
+                proxy._reject(error)
+            raise error
 
 
 class AsyncOperationProxy:
@@ -199,13 +207,19 @@ class AsyncOperationProxy:
 
     def __init__(self) -> None:
         self._result: ExecutionResult | None = None
+        self._exception: RuntimeError | None = None
 
     def _resolve(self, result: ExecutionResult) -> None:
         self._result = result
 
+    def _reject(self, exception: RuntimeError) -> None:
+        self._exception = exception
+
     @property
     def result(self) -> ExecutionResult:
         """The resolved ExecutionResult."""
+        if self._exception is not None:
+            raise self._exception
         if self._result is None:
             raise RuntimeError("AsyncBatch has not been executed yet.")
         return self._result

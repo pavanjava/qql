@@ -3201,6 +3201,61 @@ class TestSearchGroupByAdvanced:
         assert kwargs.get("search_params") is not None
 
 
+class TestBatchGroupedSearch:
+    def test_grouped_search_in_batch_runs_individually(self, executor, mock_client, mocker):
+        _mock_hybrid_collection(mock_client)
+        mock_group_response = mocker.MagicMock()
+        mock_group_response.groups = []
+        mock_client.query_points_groups.return_value = mock_group_response
+        mock_query_response = mocker.MagicMock()
+        mock_query_response.points = []
+        mock_client.query_batch_points.return_value = [mock_query_response]
+
+        from qql.lexer import Lexer
+        from qql.parser import Parser
+
+        node = Parser(
+            Lexer().tokenize(
+                "BEGIN BATCH "
+                "SEARCH articles SIMILAR TO 'q' LIMIT 5 GROUP BY category; "
+                "SEARCH articles SIMILAR TO 'plain' LIMIT 5 "
+                "END BATCH"
+            )
+        ).parse()
+
+        result = executor.execute(node)
+
+        assert result.success is True
+        mock_client.query_points_groups.assert_called_once()
+        mock_client.query_batch_points.assert_called_once()
+        assert "group(s)" in result.data[0].message
+        assert "result(s)" in result.data[1].message
+
+
+class TestNullComparisonFilters:
+    def test_equal_null_builds_is_null_condition(self, executor):
+        from qql.ast_nodes import CompareExpr
+        from qdrant_client.models import IsNullCondition
+
+        result = executor._build_qdrant_filter(
+            CompareExpr(field="deleted_at", op="=", value=None)
+        )
+
+        assert isinstance(result, IsNullCondition)
+        assert result.is_null.key == "deleted_at"
+
+    def test_not_equal_null_builds_not_null_filter(self, executor):
+        from qql.ast_nodes import CompareExpr
+        from qdrant_client.models import Filter, IsNullCondition
+
+        result = executor._build_qdrant_filter(
+            CompareExpr(field="deleted_at", op="!=", value=None)
+        )
+
+        assert isinstance(result, Filter)
+        assert isinstance(result.must_not[0], IsNullCondition)
+
+
 class TestUpdateVectorVectorShape:
     """Gaps 12 & 13 — verify exact vector shape sent to Qdrant for named/unnamed collections."""
 

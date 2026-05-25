@@ -78,19 +78,65 @@ class SearchGroupByOptions:
 
 
 def render_parameterized_query(template: str, params: dict[str, Any]) -> str:
-    query_str = template
-    for k in sorted(params.keys(), key=len, reverse=True):
-        val = params[k]
-        placeholder = f":{k}"
-        if isinstance(val, str):
-            escaped_val = val.replace("'", "\\'")
-            repr_val = f"'{escaped_val}'"
-        elif isinstance(val, bool):
-            repr_val = "true" if val else "false"
-        else:
-            repr_val = str(val)
-        query_str = query_str.replace(placeholder, repr_val)
-    return query_str
+    rendered = []
+    in_string = False
+    quote_char = ""
+    i = 0
+    while i < len(template):
+        ch = template[i]
+        if in_string:
+            rendered.append(ch)
+            if ch == "\\" and i + 1 < len(template):
+                rendered.append(template[i + 1])
+                i += 2
+                continue
+            if ch == quote_char:
+                in_string = False
+                quote_char = ""
+            i += 1
+            continue
+
+        if ch in ("'", '"'):
+            in_string = True
+            quote_char = ch
+            rendered.append(ch)
+            i += 1
+            continue
+
+        if ch == ":":
+            name_start = i + 1
+            name_end = name_start
+            while name_end < len(template) and (
+                template[name_end].isalnum() or template[name_end] == "_"
+            ):
+                name_end += 1
+            name = template[name_start:name_end]
+            if name in params:
+                rendered.append(_qql_literal(params[name]))
+                i = name_end
+                continue
+
+        rendered.append(ch)
+        i += 1
+
+    return "".join(rendered)
+
+
+def _qql_literal(value: Any) -> str:
+    if value is None:
+        return "null"
+    if isinstance(value, str):
+        escaped = (
+            value.replace("\\", "\\\\")
+            .replace("'", "\\'")
+            .replace("\n", "\\n")
+            .replace("\t", "\\t")
+            .replace("\r", "\\r")
+        )
+        return f"'{escaped}'"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return str(value)
 
 
 def collection_topology_kwargs(vectors: Any, sparse_vectors: Any) -> dict[str, Any]:
@@ -158,6 +204,14 @@ def group_batch_statements(statements: tuple[ASTNode, ...]) -> list[BatchGroup]:
     current_group: list[ASTNode] = []
 
     for stmt in statements:
+        if isinstance(stmt, SearchStmt) and stmt.group_by is not None:
+            _append_batch_group(groups, current_type, current_collection, current_group)
+            groups.append(BatchGroup("other", stmt.collection, [stmt]))
+            current_type = None
+            current_collection = None
+            current_group = []
+            continue
+
         if isinstance(stmt, (SearchStmt, RecommendStmt)):
             coll = stmt.collection
             if current_type == "query" and current_collection == coll:
@@ -247,6 +301,12 @@ def build_qdrant_filter(expr: FilterExpr) -> Any:
     if isinstance(expr, NotExpr):
         return Filter(must_not=[build_qdrant_filter(expr.operand)])
     if isinstance(expr, CompareExpr):
+        if expr.value is None:
+            null_condition = IsNullCondition(is_null=PayloadField(key=expr.field))
+            if expr.op == "=":
+                return null_condition
+            if expr.op == "!=":
+                return Filter(must_not=[null_condition])
         if expr.op == "=":
             return FieldCondition(key=expr.field, match=MatchValue(value=expr.value))
         if expr.op == "!=":

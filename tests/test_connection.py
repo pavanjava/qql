@@ -6,6 +6,7 @@ import pytest
 
 from qql import Connection, QQLConfig, Executor, ExecutionResult, run_query
 from qql.exceptions import QQLSyntaxError
+from qql.utils import render_parameterized_query
 
 
 # ── TestConnectionInit ────────────────────────────────────────────────────────
@@ -295,3 +296,45 @@ class TestConnectionBatching:
         assert p1.result.data == "res1"
         assert p2.result.data == "res2"
         mock_executor.execute.assert_called_once()
+
+    def test_qql_batch_raises_when_result_count_mismatches_proxy_count(self, mocker):
+        mocker.patch("qdrant_client.QdrantClient")
+        mock_executor = mocker.MagicMock()
+        mock_executor.execute.return_value = ExecutionResult(
+            success=True,
+            message="ok",
+            data=[ExecutionResult(success=True, message="only one", data="res1")],
+        )
+        mocker.patch("qql.connection.Executor", return_value=mock_executor)
+
+        from qql import QQLBatch
+        conn = Connection()
+        with pytest.raises(RuntimeError, match="Batch result count mismatch"):
+            with QQLBatch(conn) as batch:
+                p1 = batch.add("SHOW COLLECTIONS")
+                p2 = batch.add("SHOW COLLECTIONS")
+
+        assert p1.result.data == "res1"
+        with pytest.raises(RuntimeError, match="Batch result count mismatch"):
+            p2.result
+
+
+class TestParameterizedRendering:
+    def test_render_parameterized_query_escapes_strings_and_nulls(self):
+        rendered = render_parameterized_query(
+            "SEARCH docs SIMILAR TO :query LIMIT 5 WHERE category = :category",
+            {"query": "O'Reilly\\notes\nnext", "category": None},
+        )
+
+        assert rendered == (
+            "SEARCH docs SIMILAR TO 'O\\'Reilly\\\\notes\\nnext' "
+            "LIMIT 5 WHERE category = null"
+        )
+
+    def test_render_parameterized_query_does_not_replace_inside_strings(self):
+        rendered = render_parameterized_query(
+            "SEARCH docs SIMILAR TO ':query' LIMIT 5 WHERE tag = :query",
+            {"query": "needle"},
+        )
+
+        assert rendered == "SEARCH docs SIMILAR TO ':query' LIMIT 5 WHERE tag = 'needle'"

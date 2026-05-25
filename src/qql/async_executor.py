@@ -138,12 +138,16 @@ class AsyncExecutor(Executor):
         vector_size: int,
         topology: CollectionTopology,
         explicit_vector: str | None,
-    ) -> None:
+    ) -> CollectionTopology:
         if topology.exists:
             info = await self._client.get_collection(name)
             vectors = info.config.params.vectors  # type: ignore[union-attr]
+            sparse_vectors = info.config.params.sparse_vectors or {}
+            current_topology = CollectionTopology(
+                **collection_topology_kwargs(vectors, sparse_vectors)
+            )
             if isinstance(vectors, dict):
-                vector_name = topology.dense_using(explicit_vector)
+                vector_name = current_topology.dense_using(explicit_vector)
                 if vector_name is None:
                     raise QQLRuntimeError("Collection has no dense vector")
                 vector_config = vectors[vector_name]
@@ -164,12 +168,12 @@ class AsyncExecutor(Executor):
                     )
             else:
                 raise QQLRuntimeError("Collection has no dense vector")
+            return current_topology
         else:
             async with self._creation_lock:
                 current_topology = await self._resolve_topology(name)
                 if current_topology.exists:
-                    await self._ensure_collection(name, vector_size, current_topology, explicit_vector)
-                    return
+                    return await self._ensure_collection(name, vector_size, current_topology, explicit_vector)
 
                 await self._create_collection_and_wait(
                     collection_name=name,
@@ -179,6 +183,7 @@ class AsyncExecutor(Executor):
                         )
                     },
                 )
+                return await self._resolve_topology(name)
 
     async def _create_collection_and_wait(self, **kwargs: Any) -> None:
         collection_name = kwargs["collection_name"]
@@ -290,7 +295,7 @@ class AsyncExecutor(Executor):
         embedder = Embedder(model_name)
         vector = embedder.embed(node.values["text"])
 
-        await self._ensure_collection(
+        topology = await self._ensure_collection(
             node.collection, len(vector), topology, node.dense_vector
         )
         point_vector = build_dense_point_vector(
@@ -351,22 +356,6 @@ class AsyncExecutor(Executor):
             sparse_objs = [sparse_embedder.embed(vals["text"]) for vals in node.values_list]
 
             first_dense_vector = dense_vectors[0] if dense_vectors else None
-            points: list[PointStruct] = []
-            for idx, vals in enumerate(node.values_list):
-                point_id, payload = extract_point_id_and_payload(vals)
-                dense_vector = dense_vectors[idx]
-                sparse_obj = sparse_objs[idx]
-                sparse_vector = SparseVector(
-                    indices=sparse_obj["indices"], values=sparse_obj["values"]
-                )
-                points.append(
-                    PointStruct(
-                        id=point_id,
-                        vector={dense_name: dense_vector, sparse_name: sparse_vector},
-                        payload=payload,
-                    )
-                )
-
             if not topology.exists:
                 assert first_dense_vector is not None
                 async with self._creation_lock:
@@ -384,6 +373,22 @@ class AsyncExecutor(Executor):
                     else:
                         dense_name = current_topology.dense_using(node.dense_vector) or dense_name
                         sparse_name = current_topology.sparse_using(node.sparse_vector)
+
+            points: list[PointStruct] = []
+            for idx, vals in enumerate(node.values_list):
+                point_id, payload = extract_point_id_and_payload(vals)
+                dense_vector = dense_vectors[idx]
+                sparse_obj = sparse_objs[idx]
+                sparse_vector = SparseVector(
+                    indices=sparse_obj["indices"], values=sparse_obj["values"]
+                )
+                points.append(
+                    PointStruct(
+                        id=point_id,
+                        vector={dense_name: dense_vector, sparse_name: sparse_vector},
+                        payload=payload,
+                    )
+                )
 
             try:
                 await self._client.upsert(
@@ -406,6 +411,10 @@ class AsyncExecutor(Executor):
         vectors = [embedder.embed(vals["text"]) for vals in node.values_list]
 
         first_vector = vectors[0] if vectors else None
+        assert first_vector is not None
+        topology = await self._ensure_collection(
+            node.collection, len(first_vector), topology, node.dense_vector
+        )
         points = []
         for idx, vals in enumerate(node.values_list):
             vector = vectors[idx]
@@ -419,11 +428,6 @@ class AsyncExecutor(Executor):
             points.append(
                 PointStruct(id=point_id, vector=point_vector, payload=payload)
             )
-
-        assert first_vector is not None
-        await self._ensure_collection(
-            node.collection, len(first_vector), topology, node.dense_vector
-        )
 
         try:
             await self._client.upsert(

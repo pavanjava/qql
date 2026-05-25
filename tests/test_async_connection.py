@@ -240,6 +240,26 @@ class TestAsyncConnectionBatch:
         assert ref1.result.data == "d1"
         assert ref2.result.data == "d2"
 
+    async def test_qql_async_batch_raises_when_result_count_mismatches_proxy_count(self, mocker):
+        mocker.patch("qql.async_connection.AsyncQdrantClient")
+        mock_executor = AsyncMock()
+        mock_executor.execute.return_value = ExecutionResult(
+            success=True,
+            message="Batch executed",
+            data=[ExecutionResult(success=True, message="Res 1", data="d1")],
+        )
+        mocker.patch("qql.async_connection.AsyncExecutor", return_value=mock_executor)
+
+        conn = AsyncConnection()
+        with pytest.raises(RuntimeError, match="Batch result count mismatch"):
+            async with QQLAsyncBatch(conn) as batch:
+                ref1 = batch.add("SHOW COLLECTIONS")
+                ref2 = batch.add("SHOW COLLECTIONS")
+
+        assert ref1.result.data == "d1"
+        with pytest.raises(RuntimeError, match="Batch result count mismatch"):
+            ref2.result
+
 
 # ── TestArchitecturalGapsClosed ────────────────────────────────────────────────
 
@@ -374,6 +394,44 @@ class TestArchitecturalGapsClosed:
         assert res2.success is True
         # Verify that _create_collection_and_wait was called exactly once despite concurrency!
         executor._create_collection_and_wait.assert_called_once()
+
+    async def test_async_insert_uses_refreshed_topology_after_create_race(self, mocker):
+        """If another coroutine creates the collection, upsert must use its vector name."""
+        mock_client = AsyncMock()
+        mock_client.upsert.return_value = None
+
+        mocker.patch("qql.async_executor.Embedder.__init__", return_value=None)
+        mocker.patch("qql.async_executor.Embedder.embed", return_value=[0.1, 0.2])
+
+        from qql.executor import CollectionTopology
+
+        stale_topology = CollectionTopology(exists=False, is_named_dense=False)
+        created_topology = CollectionTopology(
+            exists=True,
+            is_named_dense=True,
+            dense_names=("body",),
+            sparse_names=(),
+        )
+
+        async def mock_ensure(*args, **kwargs):
+            return created_topology
+
+        mocker.patch("qql.async_executor.AsyncExecutor._resolve_topology", return_value=stale_topology)
+        mocker.patch("qql.async_executor.AsyncExecutor._ensure_collection", side_effect=mock_ensure)
+
+        from qql import QQLConfig
+        executor = AsyncExecutor(mock_client, QQLConfig(url="http://localhost:6333"))
+
+        from qql.parser import Parser
+        from qql.lexer import Lexer
+
+        node = Parser(
+            Lexer().tokenize("INSERT INTO COLLECTION docs VALUES {'text': 'hello', 'id': 1}")
+        ).parse()
+        await executor.execute(node)
+
+        point = mock_client.upsert.call_args.kwargs["points"][0]
+        assert point.vector == {"body": [0.1, 0.2]}
 
     def test_strict_batch_grammar(self):
         """Parser must raise QQLSyntaxError if a batch block ends with bare END instead of END BATCH."""
