@@ -291,7 +291,7 @@ class TestConnectionBatching:
             p1 = batch.add("SHOW COLLECTIONS")
             p2 = batch.add("SHOW COLLECTIONS")
             with pytest.raises(RuntimeError):
-                p1.result
+                _ = p1.result
 
         assert p1.result.data == "res1"
         assert p2.result.data == "res2"
@@ -315,9 +315,9 @@ class TestConnectionBatching:
                 p2 = batch.add("SHOW COLLECTIONS")
 
         with pytest.raises(RuntimeError, match="Batch result count mismatch"):
-            p1.result
+            _ = p1.result
         with pytest.raises(RuntimeError, match="Batch result count mismatch"):
-            p2.result
+            _ = p2.result
 
     def test_qql_batch_reuse_does_not_replay_previous_queries(self, mocker):
         mocker.patch("qdrant_client.QdrantClient")

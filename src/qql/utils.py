@@ -335,11 +335,31 @@ def build_qdrant_filter(expr: FilterExpr) -> Any:
     if isinstance(expr, BetweenExpr):
         return FieldCondition(key=expr.field, range=Range(gte=expr.low, lte=expr.high))
     if isinstance(expr, InExpr):
-        return FieldCondition(key=expr.field, match=MatchAny(any=list(expr.values)))
+        non_nulls = [value for value in expr.values if value is not None]
+        null_condition = IsNullCondition(is_null=PayloadField(key=expr.field))
+        if len(non_nulls) == len(expr.values):
+            return FieldCondition(key=expr.field, match=MatchAny(any=non_nulls))
+        if not non_nulls:
+            return null_condition
+        return Filter(
+            should=[
+                null_condition,
+                FieldCondition(key=expr.field, match=MatchAny(any=non_nulls)),
+            ]
+        )
     if isinstance(expr, NotInExpr):
+        non_nulls = [value for value in expr.values if value is not None]
+        null_condition = IsNullCondition(is_null=PayloadField(key=expr.field))
+        if len(non_nulls) != len(expr.values):
+            must_not = [null_condition]
+            if non_nulls:
+                must_not.append(
+                    FieldCondition(key=expr.field, match=MatchAny(any=non_nulls))
+                )
+            return Filter(must_not=must_not)
         return FieldCondition(
             key=expr.field,
-            match=MatchExcept(**{"except": list(expr.values)}),
+            match=MatchExcept(**{"except": non_nulls}),
         )
     if isinstance(expr, IsNullExpr):
         return IsNullCondition(is_null=PayloadField(key=expr.field))

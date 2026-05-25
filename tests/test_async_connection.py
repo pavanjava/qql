@@ -257,9 +257,9 @@ class TestAsyncConnectionBatch:
                 ref2 = batch.add("SHOW COLLECTIONS")
 
         with pytest.raises(RuntimeError, match="Batch result count mismatch"):
-            ref1.result
+            _ = ref1.result
         with pytest.raises(RuntimeError, match="Batch result count mismatch"):
-            ref2.result
+            _ = ref2.result
 
     async def test_qql_async_batch_reuse_does_not_replay_previous_queries(self, mocker):
         mocker.patch("qql.async_connection.AsyncQdrantClient")

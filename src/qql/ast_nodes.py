@@ -114,14 +114,14 @@ class BetweenExpr:
 class InExpr:
     """field IN (v1, v2, ...)"""
     field: str
-    values: tuple[str | int | float | bool, ...]
+    values: tuple[str | int | float | bool | None, ...]
 
 
 @dataclass(frozen=True)
 class NotInExpr:
     """field NOT IN (v1, v2, ...)"""
     field: str
-    values: tuple[str | int | float | bool, ...]
+    values: tuple[str | int | float | bool | None, ...]
 
 
 @dataclass(frozen=True)

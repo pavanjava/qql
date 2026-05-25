@@ -1729,6 +1729,46 @@ class TestSearchWithFilter:
         assert isinstance(result, FieldCondition)
         assert isinstance(result.match, MatchExcept)
 
+    def test_build_in_with_only_null(self, executor):
+        from qdrant_client.models import IsNullCondition
+        from qql.ast_nodes import InExpr
+
+        result = executor._build_qdrant_filter(InExpr(field="status", values=(None,)))
+        assert isinstance(result, IsNullCondition)
+        assert result.is_null.key == "status"
+
+    def test_build_in_with_null_and_values(self, executor):
+        from qdrant_client.models import Filter, FieldCondition, IsNullCondition, MatchAny
+        from qql.ast_nodes import InExpr
+
+        result = executor._build_qdrant_filter(InExpr(field="status", values=(None, "draft")))
+        assert isinstance(result, Filter)
+        assert isinstance(result.should[0], IsNullCondition)
+        assert isinstance(result.should[1], FieldCondition)
+        assert isinstance(result.should[1].match, MatchAny)
+        assert result.should[1].match.any == ["draft"]
+
+    def test_build_not_in_with_only_null(self, executor):
+        from qdrant_client.models import Filter, IsNullCondition
+        from qql.ast_nodes import NotInExpr
+
+        result = executor._build_qdrant_filter(NotInExpr(field="status", values=(None,)))
+        assert isinstance(result, Filter)
+        assert isinstance(result.must_not[0], IsNullCondition)
+
+    def test_build_not_in_with_null_and_values(self, executor):
+        from qdrant_client.models import Filter, FieldCondition, IsNullCondition, MatchAny
+        from qql.ast_nodes import NotInExpr
+
+        result = executor._build_qdrant_filter(
+            NotInExpr(field="status", values=(None, "deleted"))
+        )
+        assert isinstance(result, Filter)
+        assert isinstance(result.must_not[0], IsNullCondition)
+        assert isinstance(result.must_not[1], FieldCondition)
+        assert isinstance(result.must_not[1].match, MatchAny)
+        assert result.must_not[1].match.any == ["deleted"]
+
     def test_build_is_null(self, executor):
         from qdrant_client.models import IsNullCondition
         from qql.ast_nodes import IsNullExpr
