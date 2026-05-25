@@ -25,9 +25,9 @@ class QuantizationConfig:
 class SearchWith:
     """Query-time search params supported by Qdrant SearchParams."""
     hnsw_ef: int | None = None
-    exact: bool = False
-    acorn: bool = False
-    indexed_only: bool = False
+    exact: bool | None = None
+    acorn: bool | None = None
+    indexed_only: bool | None = None
     quantization: "QuantizationSearchWith | None" = None
     mmr_diversity: float | None = None
     mmr_candidates: int | None = None

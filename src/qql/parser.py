@@ -1278,9 +1278,9 @@ class Parser:
     def _parse_with_clause(self) -> SearchWith:
         self._expect(TokenKind.LBRACE)
         hnsw_ef: int | None = None
-        exact: bool = False
-        acorn: bool = False
-        indexed_only: bool = False
+        exact: bool | None = None
+        acorn: bool | None = None
+        indexed_only: bool | None = None
         quantization: QuantizationSearchWith | None = None
         mmr_diversity: float | None = None
         mmr_candidates: int | None = None

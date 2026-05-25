@@ -182,24 +182,30 @@ class QQLAsyncBatch:
         return proxy
 
     async def __aenter__(self) -> QQLAsyncBatch:
+        self._queries.clear()
+        self._proxies.clear()
         return self
 
     async def __aexit__(self, exc_type: type[BaseException] | None, exc_val: BaseException | None, exc_tb: Any) -> None:
-        if exc_type is not None:
-            return
-        if not self._queries:
-            return
-        results = await self.connection.run_queries_batch(self._queries)
-        for proxy, res in zip(self._proxies, results, strict=False):
-            proxy._resolve(res)
-        if len(results) != len(self._proxies):
-            error = RuntimeError(
-                "Batch result count mismatch: "
-                f"expected {len(self._proxies)}, got {len(results)}"
-            )
-            for proxy in self._proxies[len(results):]:
-                proxy._reject(error)
-            raise error
+        try:
+            if exc_type is not None:
+                return
+            if not self._queries:
+                return
+            results = await self.connection.run_queries_batch(self._queries)
+            if len(results) != len(self._proxies):
+                error = RuntimeError(
+                    "Batch result count mismatch: "
+                    f"expected {len(self._proxies)}, got {len(results)}"
+                )
+                for proxy in self._proxies:
+                    proxy._reject(error)
+                raise error
+            for proxy, res in zip(self._proxies, results, strict=True):
+                proxy._resolve(res)
+        finally:
+            self._queries.clear()
+            self._proxies.clear()
 
 
 class AsyncOperationProxy:

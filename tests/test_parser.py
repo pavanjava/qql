@@ -1101,6 +1101,17 @@ class TestSearchWithClause:
         assert node.with_clause is not None
         assert node.with_clause.exact is False
 
+    def test_exact_keyword_survives_with_clause_merge(self):
+        node = parse("SEARCH col SIMILAR TO 'q' LIMIT 5 EXACT WITH { hnsw_ef: 128 }")
+        assert node.with_clause is not None
+        assert node.with_clause.exact is True
+        assert node.with_clause.hnsw_ef == 128
+
+    def test_with_exact_false_can_override_exact_keyword(self):
+        node = parse("SEARCH col SIMILAR TO 'q' LIMIT 5 EXACT WITH { exact: false }")
+        assert node.with_clause is not None
+        assert node.with_clause.exact is False
+
     def test_with_acorn(self):
         node = parse("SEARCH col SIMILAR TO 'q' LIMIT 5 WITH { acorn: true }")
         assert node.with_clause is not None

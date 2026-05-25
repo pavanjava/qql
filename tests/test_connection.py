@@ -314,9 +314,36 @@ class TestConnectionBatching:
                 p1 = batch.add("SHOW COLLECTIONS")
                 p2 = batch.add("SHOW COLLECTIONS")
 
-        assert p1.result.data == "res1"
+        with pytest.raises(RuntimeError, match="Batch result count mismatch"):
+            p1.result
         with pytest.raises(RuntimeError, match="Batch result count mismatch"):
             p2.result
+
+    def test_qql_batch_reuse_does_not_replay_previous_queries(self, mocker):
+        mocker.patch("qdrant_client.QdrantClient")
+        mock_executor = mocker.MagicMock()
+        mock_executor.execute.side_effect = [
+            ExecutionResult(success=True, message="ok", data=[
+                ExecutionResult(success=True, message="first", data="res1"),
+            ]),
+            ExecutionResult(success=True, message="ok", data=[
+                ExecutionResult(success=True, message="second", data="res2"),
+            ]),
+        ]
+        mocker.patch("qql.connection.Executor", return_value=mock_executor)
+
+        from qql import QQLBatch
+        conn = Connection()
+        batch = QQLBatch(conn)
+        with batch:
+            first = batch.add("SHOW COLLECTIONS")
+        with batch:
+            second = batch.add("SHOW COLLECTIONS")
+
+        assert first.result.data == "res1"
+        assert second.result.data == "res2"
+        assert len(mock_executor.execute.call_args_list[0].args[0].statements) == 1
+        assert len(mock_executor.execute.call_args_list[1].args[0].statements) == 1
 
 
 class TestParameterizedRendering:
@@ -338,3 +365,21 @@ class TestParameterizedRendering:
         )
 
         assert rendered == "SEARCH docs SIMILAR TO ':query' LIMIT 5 WHERE tag = 'needle'"
+
+    def test_render_parameterized_query_renders_compound_literals(self):
+        rendered = render_parameterized_query(
+            "INSERT INTO COLLECTION docs VALUES :values",
+            {
+                "values": {
+                    "text": "hello",
+                    "tags": ["a", "b"],
+                    "meta": {"score": 1, "active": True},
+                }
+            },
+        )
+
+        assert rendered == (
+            "INSERT INTO COLLECTION docs VALUES "
+            "{'text': 'hello', 'tags': ['a', 'b'], "
+            "'meta': {'score': 1, 'active': true}}"
+        )

@@ -3255,6 +3255,41 @@ class TestNullComparisonFilters:
         assert isinstance(result, Filter)
         assert isinstance(result.must_not[0], IsNullCondition)
 
+    def test_ordering_comparison_to_null_raises_clear_error(self, executor):
+        from qql.ast_nodes import CompareExpr
+
+        with pytest.raises(QQLRuntimeError, match="Cannot use operator '>' with null"):
+            executor._build_qdrant_filter(
+                CompareExpr(field="deleted_at", op=">", value=None)
+            )
+
+
+class TestMergeSearchWith:
+    def test_merge_search_with_preserves_zero_values(self):
+        from qql.ast_nodes import SearchWith
+        from qql.utils import merge_search_with
+
+        merged = merge_search_with(
+            SearchWith(hnsw_ef=128, mmr_candidates=10),
+            SearchWith(hnsw_ef=0, mmr_candidates=0),
+        )
+
+        assert merged.hnsw_ef == 0
+        assert merged.mmr_candidates == 0
+
+    def test_merge_search_with_can_override_true_with_false(self):
+        from qql.ast_nodes import SearchWith
+        from qql.utils import merge_search_with
+
+        merged = merge_search_with(
+            SearchWith(exact=True, acorn=True, indexed_only=True),
+            SearchWith(exact=False, acorn=False, indexed_only=False),
+        )
+
+        assert merged.exact is False
+        assert merged.acorn is False
+        assert merged.indexed_only is False
+
 
 class TestUpdateVectorVectorShape:
     """Gaps 12 & 13 — verify exact vector shape sent to Qdrant for named/unnamed collections."""

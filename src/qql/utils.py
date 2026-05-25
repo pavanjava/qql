@@ -126,17 +126,29 @@ def _qql_literal(value: Any) -> str:
     if value is None:
         return "null"
     if isinstance(value, str):
-        escaped = (
-            value.replace("\\", "\\\\")
-            .replace("'", "\\'")
-            .replace("\n", "\\n")
-            .replace("\t", "\\t")
-            .replace("\r", "\\r")
-        )
-        return f"'{escaped}'"
+        return _qql_string_literal(value)
     if isinstance(value, bool):
         return "true" if value else "false"
+    if isinstance(value, (list, tuple)):
+        return "[" + ", ".join(_qql_literal(item) for item in value) + "]"
+    if isinstance(value, dict):
+        items = ", ".join(
+            f"{_qql_string_literal(str(key))}: {_qql_literal(item)}"
+            for key, item in value.items()
+        )
+        return "{" + items + "}"
     return str(value)
+
+
+def _qql_string_literal(value: str) -> str:
+    escaped = (
+        value.replace("\\", "\\\\")
+        .replace("'", "\\'")
+        .replace("\n", "\\n")
+        .replace("\t", "\\t")
+        .replace("\r", "\\r")
+    )
+    return f"'{escaped}'"
 
 
 def collection_topology_kwargs(vectors: Any, sparse_vectors: Any) -> dict[str, Any]:
@@ -307,6 +319,9 @@ def build_qdrant_filter(expr: FilterExpr) -> Any:
                 return null_condition
             if expr.op == "!=":
                 return Filter(must_not=[null_condition])
+            raise QQLRuntimeError(
+                f"Cannot use operator '{expr.op}' with null for field '{expr.field}'"
+            )
         if expr.op == "=":
             return FieldCondition(key=expr.field, match=MatchValue(value=expr.value))
         if expr.op == "!=":
@@ -467,17 +482,29 @@ def merge_search_with(base: SearchWith | None, override: SearchWith) -> SearchWi
     if base is None:
         return override
     return SearchWith(
-        hnsw_ef=override.hnsw_ef or base.hnsw_ef,
-        exact=override.exact or base.exact,
-        acorn=override.acorn or base.acorn,
-        indexed_only=override.indexed_only or base.indexed_only,
-        quantization=override.quantization or base.quantization,
+        hnsw_ef=override.hnsw_ef if override.hnsw_ef is not None else base.hnsw_ef,
+        exact=override.exact if override.exact is not None else base.exact,
+        acorn=override.acorn if override.acorn is not None else base.acorn,
+        indexed_only=(
+            override.indexed_only
+            if override.indexed_only is not None
+            else base.indexed_only
+        ),
+        quantization=(
+            override.quantization
+            if override.quantization is not None
+            else base.quantization
+        ),
         mmr_diversity=(
             override.mmr_diversity
             if override.mmr_diversity is not None
             else base.mmr_diversity
         ),
-        mmr_candidates=override.mmr_candidates or base.mmr_candidates,
+        mmr_candidates=(
+            override.mmr_candidates
+            if override.mmr_candidates is not None
+            else base.mmr_candidates
+        ),
     )
 
 

@@ -190,24 +190,30 @@ class QQLBatch:
         return proxy
 
     def __enter__(self) -> QQLBatch:
+        self._queries.clear()
+        self._proxies.clear()
         return self
 
     def __exit__(self, exc_type: type[BaseException] | None, exc_val: BaseException | None, exc_tb: Any) -> None:
-        if exc_type is not None:
-            return
-        if not self._queries:
-            return
-        results = self.connection.run_queries_batch(self._queries)
-        for proxy, res in zip(self._proxies, results, strict=False):
-            proxy._resolve(res)
-        if len(results) != len(self._proxies):
-            error = RuntimeError(
-                "Batch result count mismatch: "
-                f"expected {len(self._proxies)}, got {len(results)}"
-            )
-            for proxy in self._proxies[len(results):]:
-                proxy._reject(error)
-            raise error
+        try:
+            if exc_type is not None:
+                return
+            if not self._queries:
+                return
+            results = self.connection.run_queries_batch(self._queries)
+            if len(results) != len(self._proxies):
+                error = RuntimeError(
+                    "Batch result count mismatch: "
+                    f"expected {len(self._proxies)}, got {len(results)}"
+                )
+                for proxy in self._proxies:
+                    proxy._reject(error)
+                raise error
+            for proxy, res in zip(self._proxies, results, strict=True):
+                proxy._resolve(res)
+        finally:
+            self._queries.clear()
+            self._proxies.clear()
 
 
 class OperationProxy:

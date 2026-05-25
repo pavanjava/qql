@@ -256,9 +256,35 @@ class TestAsyncConnectionBatch:
                 ref1 = batch.add("SHOW COLLECTIONS")
                 ref2 = batch.add("SHOW COLLECTIONS")
 
-        assert ref1.result.data == "d1"
+        with pytest.raises(RuntimeError, match="Batch result count mismatch"):
+            ref1.result
         with pytest.raises(RuntimeError, match="Batch result count mismatch"):
             ref2.result
+
+    async def test_qql_async_batch_reuse_does_not_replay_previous_queries(self, mocker):
+        mocker.patch("qql.async_connection.AsyncQdrantClient")
+        mock_executor = AsyncMock()
+        mock_executor.execute.side_effect = [
+            ExecutionResult(success=True, message="ok", data=[
+                ExecutionResult(success=True, message="first", data="d1"),
+            ]),
+            ExecutionResult(success=True, message="ok", data=[
+                ExecutionResult(success=True, message="second", data="d2"),
+            ]),
+        ]
+        mocker.patch("qql.async_connection.AsyncExecutor", return_value=mock_executor)
+
+        conn = AsyncConnection()
+        batch = QQLAsyncBatch(conn)
+        async with batch:
+            first = batch.add("SHOW COLLECTIONS")
+        async with batch:
+            second = batch.add("SHOW COLLECTIONS")
+
+        assert first.result.data == "d1"
+        assert second.result.data == "d2"
+        assert len(mock_executor.execute.call_args_list[0].args[0].statements) == 1
+        assert len(mock_executor.execute.call_args_list[1].args[0].statements) == 1
 
 
 # ── TestArchitecturalGapsClosed ────────────────────────────────────────────────
