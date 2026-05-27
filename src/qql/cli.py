@@ -207,6 +207,8 @@ def connect(
     except Exception as e:
         err_console.print(f"[bold red]Connection failed:[/bold red] {e}")
         sys.exit(1)
+    else:
+        client.close()
 
     cfg = QQLConfig(url=url, secret=secret, verify=verify_val)
     save_config(cfg)
