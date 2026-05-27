@@ -77,6 +77,24 @@ qql connect --url http://localhost:6333
 qql connect --url https://<your-cluster>.qdrant.io --secret <your-api-key>
 ```
 
+### HTTPS with an internal CA or self-signed certificate
+
+Prefer a custom CA bundle when your Qdrant endpoint uses an internal or
+self-signed certificate:
+
+```bash
+qql connect --url https://<your-host>:6333 --secret <your-api-key> --ca-cert /path/to/ca.pem
+```
+
+If you cannot provide a CA bundle, TLS verification can be disabled:
+
+```bash
+qql connect --url https://<your-host>:6333 --secret <your-api-key> --no-verify
+```
+
+`--no-verify` should be limited to trusted internal environments because it
+skips certificate validation.
+
 On success you will see:
 
 ```

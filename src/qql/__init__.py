@@ -42,6 +42,7 @@ def run_query(
     url: str = "http://localhost:6333",
     secret: str | None = None,
     default_model: str | None = None,
+    verify: bool | str = True,
 ) -> ExecutionResult:
     """One-shot convenience function kept for backward compatibility.
 
@@ -55,5 +56,10 @@ def run_query(
         with Connection(url, secret=secret) as conn:
             result = conn.run_query(query)
     """
-    with Connection(url=url, secret=secret, default_model=default_model) as conn:
+    with Connection(
+        url=url,
+        secret=secret,
+        default_model=default_model,
+        verify=verify,
+    ) as conn:
         return conn.run_query(query)

@@ -51,6 +51,7 @@ class Connection:
         url: str = "http://localhost:6333",
         secret: str | None = None,
         default_model: str | None = None,
+        verify: bool | str = True,
     ) -> None:
         """Create a connection to a Qdrant instance.
 
@@ -60,6 +61,9 @@ class Connection:
             default_model: Dense embedding model used when no ``USING MODEL`` clause
                 is specified.  Defaults to
                 ``sentence-transformers/all-MiniLM-L6-v2``.
+            verify: SSL certificate verification. Set to ``False`` to skip
+                verification for self-signed/internal certificates, or pass
+                a path to a custom CA bundle (default: ``True``).
         """
         from qdrant_client import QdrantClient
 
@@ -67,8 +71,9 @@ class Connection:
             url=url,
             secret=secret,
             default_model=default_model or DEFAULT_MODEL,
+            verify=verify,
         )
-        self._client = QdrantClient(url=url, api_key=secret)
+        self._client = QdrantClient(url=url, api_key=secret, verify=verify)
         self._executor = Executor(self._client, self._config)
 
     # ── Public API ────────────────────────────────────────────────────────
