@@ -173,20 +173,44 @@ def main(ctx: click.Context) -> None:
 @main.command()
 @click.option("--url", required=True, help="Qdrant instance URL, e.g. http://localhost:6333")
 @click.option("--secret", default=None, help="API key / secret (optional)")
-def connect(url: str, secret: str | None) -> None:
+@click.option(
+    "--verify/--no-verify",
+    default=True,
+    show_default=True,
+    help="Verify SSL/TLS certificate (disable for self-signed certs).",
+)
+@click.option(
+    "--ca-cert",
+    default=None,
+    type=click.Path(exists=True, readable=True, dir_okay=False, resolve_path=True),
+    help="Path to a custom CA certificate bundle (PEM).",
+)
+def connect(
+    url: str,
+    secret: str | None,
+    verify: bool,
+    ca_cert: str | None,
+) -> None:
     """Connect to a Qdrant instance and launch the QQL shell."""
     from qdrant_client import QdrantClient
+
+    if ca_cert and not verify:
+        raise click.UsageError("--ca-cert cannot be used with --no-verify.")
+
+    verify_val: bool | str = ca_cert if ca_cert else verify
 
     console.print(f"Connecting to [bold]{url}[/bold]...")
 
     try:
-        client = QdrantClient(url=url, api_key=secret)
-        client.get_collections()  # validate connection
+        client = QdrantClient(url=url, api_key=secret, verify=verify_val)
+        client.get_collections()
     except Exception as e:
         err_console.print(f"[bold red]Connection failed:[/bold red] {e}")
         sys.exit(1)
+    else:
+        client.close()
 
-    cfg = QQLConfig(url=url, secret=secret)
+    cfg = QQLConfig(url=url, secret=secret, verify=verify_val)
     save_config(cfg)
     console.print("[bold green]Connected.[/bold green] Config saved to ~/.qql/config.json\n")
     _launch_repl(cfg)
@@ -228,7 +252,7 @@ def execute(file: str, stop_on_error: bool) -> None:
         sys.exit(1)
 
     try:
-        client = QdrantClient(url=cfg.url, api_key=cfg.secret)
+        client = QdrantClient(url=cfg.url, api_key=cfg.secret, verify=cfg.verify)
         client.get_collections()
     except Exception as e:
         err_console.print(f"[bold red]Connection failed:[/bold red] {e}")
@@ -286,7 +310,7 @@ def dump(collection: str, output: str, batch_size: int) -> None:
         sys.exit(1)
 
     try:
-        client = QdrantClient(url=cfg.url, api_key=cfg.secret)
+        client = QdrantClient(url=cfg.url, api_key=cfg.secret, verify=cfg.verify)
         client.get_collections()
     except Exception as e:
         err_console.print(f"[bold red]Connection failed:[/bold red] {e}")
@@ -319,7 +343,7 @@ def _launch_repl(cfg: QQLConfig) -> None:
     from qdrant_client import QdrantClient
 
     try:
-        client = QdrantClient(url=cfg.url, api_key=cfg.secret)
+        client = QdrantClient(url=cfg.url, api_key=cfg.secret, verify=cfg.verify)
         client.get_collections()
     except Exception as e:
         err_console.print(f"[bold red]Could not connect to {cfg.url}:[/bold red] {e}")

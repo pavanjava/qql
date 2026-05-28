@@ -88,6 +88,30 @@ with Connection(
     print(result.data)
 ```
 
+### Internal or self-signed certificates
+
+Prefer a custom CA bundle when your Qdrant endpoint uses an internal or
+self-signed certificate:
+
+```python
+from qql import Connection
+
+with Connection(
+    "https://<your-host>:6333",
+    secret="<your-api-key>",
+    verify="/path/to/ca.pem",
+) as conn:
+    result = conn.run_query("SHOW COLLECTIONS")
+```
+
+If a CA bundle is not available, pass `verify=False` to disable TLS
+verification for trusted internal environments:
+
+```python
+with Connection("https://<your-host>:6333", verify=False) as conn:
+    ...
+```
+
 ### Custom embedding model
 
 ```python
@@ -175,6 +199,7 @@ with Connection("http://localhost:6333") as conn:
 | `default_model` | `str \| None` | `None` → `sentence-transformers/all-MiniLM-L6-v2` | Dense embedding model used when no `USING MODEL` clause is given |
 | `prefer_grpc` | `bool` | `False` | Passes `prefer_grpc=True` to the Qdrant client |
 | `grpc_port` | `int` | `6334` | gRPC port used when `prefer_grpc=True` |
+| `verify` | `bool \| str` | `True` | TLS verification setting; use `False` to skip verification or a CA bundle path for internal/self-signed certificates |
 | `default_dense_vector_name` | `str` | `"dense"` | Dense vector name used when QQL creates a collection and no explicit `USING VECTOR` name is given |
 | `default_sparse_vector_name` | `str` | `"sparse"` | Sparse vector name used when QQL creates a hybrid collection and no explicit sparse vector name is given |
 
@@ -326,8 +351,8 @@ for hit in result.data:
     print(hit["score"], hit["payload"])
 ```
 
-`run_query()` accepts the same `url`, `secret`, and `default_model` parameters
-as `Connection.__init__()`.
+`run_query()` accepts the same `url`, `secret`, `default_model`, and `verify`
+parameters as `Connection.__init__()`.
 
 ---
 

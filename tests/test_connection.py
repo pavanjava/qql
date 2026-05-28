@@ -24,8 +24,26 @@ class TestConnectionInit:
         mock_client_cls = mocker.patch("qdrant_client.QdrantClient")
         Connection("https://cloud.example.io", secret="s3cr3t")
         mock_client_cls.assert_called_once_with(
-            url="https://cloud.example.io", api_key="s3cr3t"
+            url="https://cloud.example.io", api_key="s3cr3t", verify=True
         )
+
+    def test_ssl_verify_option_passed_to_qdrant_client(self, mocker):
+        mock_client_cls = mocker.patch("qdrant_client.QdrantClient")
+        conn = Connection("https://internal.example.io", verify=False)
+        mock_client_cls.assert_called_once_with(
+            url="https://internal.example.io", api_key=None, verify=False
+        )
+        assert conn.config.verify is False
+
+    def test_custom_ca_bundle_passed_to_qdrant_client(self, mocker):
+        mock_client_cls = mocker.patch("qdrant_client.QdrantClient")
+        conn = Connection("https://internal.example.io", verify="/etc/ssl/internal-ca.pem")
+        mock_client_cls.assert_called_once_with(
+            url="https://internal.example.io",
+            api_key=None,
+            verify="/etc/ssl/internal-ca.pem",
+        )
+        assert conn.config.verify == "/etc/ssl/internal-ca.pem"
 
     def test_custom_default_model_stored_in_config(self, mocker):
         mocker.patch("qdrant_client.QdrantClient")
@@ -157,7 +175,7 @@ class TestRunQueryBackwardCompat:
         conn_cls = mocker.patch("qql.Connection", return_value=conn_instance)
         run_query("SHOW COLLECTIONS", url="http://localhost:6333")
         conn_cls.assert_called_once_with(
-            url="http://localhost:6333", secret=None, default_model=None
+            url="http://localhost:6333", secret=None, default_model=None, verify=True
         )
         conn_instance.run_query.assert_called_once_with("SHOW COLLECTIONS")
 

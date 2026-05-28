@@ -87,6 +87,12 @@ qql connect --url http://localhost:6333
 
 # Qdrant Cloud
 qql connect --url https://<your-cluster>.qdrant.io --secret <your-api-key>
+
+# Internal/self-signed certificate
+qql connect --url https://<your-host>:6333 --secret <your-api-key> --ca-cert /path/to/ca.pem
+
+# Disable TLS verification when you cannot provide a CA bundle
+qql connect --url https://<your-host>:6333 --secret <your-api-key> --no-verify
 ```
 
 Then type `qql` to open the interactive shell.

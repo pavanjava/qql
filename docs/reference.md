@@ -133,7 +133,8 @@ The connection config is stored at `~/.qql/config.json`:
 {
   "url": "http://localhost:6333",
   "secret": null,
-  "default_model": "sentence-transformers/all-MiniLM-L6-v2"
+  "default_model": "sentence-transformers/all-MiniLM-L6-v2",
+  "verify": true
 }
 ```
 
@@ -142,6 +143,7 @@ The connection config is stored at `~/.qql/config.json`:
 | `url` | Qdrant instance URL |
 | `secret` | API key (null if not required) |
 | `default_model` | Dense embedding model used when no `USING MODEL` clause is given |
+| `verify` | TLS verification setting: `true`, `false`, or a custom CA bundle path from `--ca-cert` |
 
 You can edit this file directly to change the default model without reconnecting.
 

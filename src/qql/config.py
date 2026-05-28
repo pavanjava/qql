@@ -19,6 +19,7 @@ class QQLConfig:
     default_model: str = DEFAULT_MODEL
     default_dense_vector_name: str = DEFAULT_DENSE_VECTOR_NAME
     default_sparse_vector_name: str = DEFAULT_SPARSE_VECTOR_NAME
+    verify: bool | str = True
 
 
 def save_config(cfg: QQLConfig) -> None:
@@ -43,6 +44,7 @@ def load_config() -> QQLConfig | None:
         default_sparse_vector_name=data.get(
             "default_sparse_vector_name", DEFAULT_SPARSE_VECTOR_NAME
         ),
+        verify=data.get("verify", True),
     )
 
 

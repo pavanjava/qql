@@ -55,6 +55,7 @@ class Connection:
         default_model: str | None = None,
         prefer_grpc: bool = False,
         grpc_port: int = 6334,
+        verify: bool | str = True,
     ) -> None:
         """Create a connection to a Qdrant instance.
 
@@ -66,6 +67,9 @@ class Connection:
                 ``sentence-transformers/all-MiniLM-L6-v2``.
             prefer_grpc: Whether to connect via fast gRPC transport.
             grpc_port: The gRPC port of Qdrant instance (default: 6334).
+            verify: SSL certificate verification. Set to ``False`` to skip
+                verification for self-signed/internal certificates, or pass
+                a path to a custom CA bundle (default: ``True``).
         """
         from qdrant_client import QdrantClient
 
@@ -79,6 +83,7 @@ class Connection:
             client_kwargs["prefer_grpc"] = True
             client_kwargs["grpc_port"] = grpc_port
         self._client = QdrantClient(**client_kwargs)
+        self._client = QdrantClient(url=url, api_key=secret, verify=verify)
         self._executor = Executor(self._client, self._config)
 
     # ── Public API ────────────────────────────────────────────────────────
@@ -114,7 +119,7 @@ class Connection:
             tokens = Lexer().tokenize(q)
             node = Parser(tokens).parse()
             nodes.append(node)
-        
+
         batch_node = BatchBlockStmt(statements=tuple(nodes))
         res = self._executor.execute(batch_node)
         return res.data
