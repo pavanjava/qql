@@ -25,9 +25,9 @@ class QuantizationConfig:
 class SearchWith:
     """Query-time search params supported by Qdrant SearchParams."""
     hnsw_ef: int | None = None
-    exact: bool | None = None
-    acorn: bool | None = None
-    indexed_only: bool | None = None
+    exact: bool = False
+    acorn: bool = False
+    indexed_only: bool = False
     quantization: "QuantizationSearchWith | None" = None
     mmr_diversity: float | None = None
     mmr_candidates: int | None = None
@@ -114,14 +114,14 @@ class BetweenExpr:
 class InExpr:
     """field IN (v1, v2, ...)"""
     field: str
-    values: tuple[str | int | float | bool | None, ...]
+    values: tuple[str | int | float | bool, ...]
 
 
 @dataclass(frozen=True)
 class NotInExpr:
     """field NOT IN (v1, v2, ...)"""
     field: str
-    values: tuple[str | int | float | bool | None, ...]
+    values: tuple[str | int | float | bool, ...]
 
 
 @dataclass(frozen=True)
@@ -340,11 +340,6 @@ class UpdatePayloadStmt:
     query_filter: FilterExpr | None = None
 
 
-@dataclass(frozen=True)
-class BatchBlockStmt:
-    statements: tuple[ASTNode, ...]
-
-
 # Union type for all top-level statement nodes
 ASTNode = (
     InsertStmt
@@ -362,5 +357,4 @@ ASTNode = (
     | DeleteStmt
     | UpdateVectorStmt
     | UpdatePayloadStmt
-    | BatchBlockStmt
 )

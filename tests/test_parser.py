@@ -46,21 +46,6 @@ def parse(query: str):
     return Parser(tokens).parse()
 
 
-class TestStatementBoundaries:
-    def test_top_level_statement_allows_trailing_semicolon(self):
-        node = parse("SHOW COLLECTIONS;")
-        assert isinstance(node, ShowCollectionsStmt)
-
-    def test_batch_block_allows_trailing_semicolon(self):
-        node = parse(
-            "BEGIN BATCH\n"
-            "SHOW COLLECTIONS;\n"
-            "END BATCH;"
-        )
-        assert len(node.statements) == 1
-        assert isinstance(node.statements[0], ShowCollectionsStmt)
-
-
 class TestInsert:
     def test_basic_insert(self):
         node = parse("INSERT INTO COLLECTION notes VALUES {'text': 'hello'}")
@@ -1098,17 +1083,6 @@ class TestSearchWithClause:
 
     def test_with_exact_false(self):
         node = parse("SEARCH col SIMILAR TO 'q' LIMIT 5 WITH { exact: false }")
-        assert node.with_clause is not None
-        assert node.with_clause.exact is False
-
-    def test_exact_keyword_survives_with_clause_merge(self):
-        node = parse("SEARCH col SIMILAR TO 'q' LIMIT 5 EXACT WITH { hnsw_ef: 128 }")
-        assert node.with_clause is not None
-        assert node.with_clause.exact is True
-        assert node.with_clause.hnsw_ef == 128
-
-    def test_with_exact_false_can_override_exact_keyword(self):
-        node = parse("SEARCH col SIMILAR TO 'q' LIMIT 5 EXACT WITH { exact: false }")
         assert node.with_clause is not None
         assert node.with_clause.exact is False
 

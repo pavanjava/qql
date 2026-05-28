@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-from typing import Any
 from .config import DEFAULT_MODEL, QQLConfig
 from .executor import Executor, ExecutionResult
 from .lexer import Lexer
 from .parser import Parser
-from .utils import render_parameterized_query
 
 
 class Connection:
@@ -53,8 +51,6 @@ class Connection:
         url: str = "http://localhost:6333",
         secret: str | None = None,
         default_model: str | None = None,
-        prefer_grpc: bool = False,
-        grpc_port: int = 6334,
         verify: bool | str = True,
     ) -> None:
         """Create a connection to a Qdrant instance.
@@ -65,8 +61,6 @@ class Connection:
             default_model: Dense embedding model used when no ``USING MODEL`` clause
                 is specified.  Defaults to
                 ``sentence-transformers/all-MiniLM-L6-v2``.
-            prefer_grpc: Whether to connect via fast gRPC transport.
-            grpc_port: The gRPC port of Qdrant instance (default: 6334).
             verify: SSL certificate verification. Set to ``False`` to skip
                 verification for self-signed/internal certificates, or pass
                 a path to a custom CA bundle (default: ``True``).
@@ -77,12 +71,8 @@ class Connection:
             url=url,
             secret=secret,
             default_model=default_model or DEFAULT_MODEL,
+            verify=verify,
         )
-        client_kwargs = {"url": url, "api_key": secret}
-        if prefer_grpc:
-            client_kwargs["prefer_grpc"] = True
-            client_kwargs["grpc_port"] = grpc_port
-        self._client = QdrantClient(**client_kwargs)
         self._client = QdrantClient(url=url, api_key=secret, verify=verify)
         self._executor = Executor(self._client, self._config)
 
@@ -106,38 +96,6 @@ class Connection:
         tokens = Lexer().tokenize(query)
         node = Parser(tokens).parse()
         return self._executor.execute(node)
-
-    def run_queries_batch(self, queries: list[str]) -> list[ExecutionResult]:
-        """Parse and execute a batch of QQL statements.
-
-        Combines compatible operations (such as SEARCH queries) to execute in
-        a single network request.
-        """
-        from .ast_nodes import BatchBlockStmt
-        nodes = []
-        for q in queries:
-            tokens = Lexer().tokenize(q)
-            node = Parser(tokens).parse()
-            nodes.append(node)
-
-        batch_node = BatchBlockStmt(statements=tuple(nodes))
-        res = self._executor.execute(batch_node)
-        return res.data
-
-    def run_parameterized_query(self, template: str, params: dict[str, Any]) -> ExecutionResult:
-        """Execute one QQL query template with named parameters.
-
-        Uses named placeholders prefixed with ':' (e.g. :query, :category).
-        """
-        return self.run_query(render_parameterized_query(template, params))
-
-    def run_parameterized_batch(self, template: str, params: list[dict[str, Any]]) -> list[ExecutionResult]:
-        """Execute a single QQL query template with a batch of parameters.
-
-        Uses named placeholders prefixed with ':' (e.g. :query, :category).
-        """
-        queries = [render_parameterized_query(template, p) for p in params]
-        return self.run_queries_batch(queries)
 
     def close(self) -> None:
         """Close the underlying Qdrant HTTP connection pool.
@@ -177,68 +135,3 @@ class Connection:
             result = conn.executor.execute(node)
         """
         return self._executor
-
-
-class QQLBatch:
-    """Session context manager for executing batch queries and mutations in QQL."""
-
-    def __init__(self, connection: Connection) -> None:
-        self.connection = connection
-        self._queries: list[str] = []
-        self._proxies: list[OperationProxy] = []
-
-    def add(self, query: str) -> OperationProxy:
-        """Queue a QQL statement for batch execution."""
-        self._queries.append(query)
-        proxy = OperationProxy()
-        self._proxies.append(proxy)
-        return proxy
-
-    def __enter__(self) -> QQLBatch:
-        self._queries.clear()
-        self._proxies.clear()
-        return self
-
-    def __exit__(self, exc_type: type[BaseException] | None, exc_val: BaseException | None, exc_tb: Any) -> None:
-        try:
-            if exc_type is not None:
-                return
-            if not self._queries:
-                return
-            results = self.connection.run_queries_batch(self._queries)
-            if len(results) != len(self._proxies):
-                error = RuntimeError(
-                    "Batch result count mismatch: "
-                    f"expected {len(self._proxies)}, got {len(results)}"
-                )
-                for proxy in self._proxies:
-                    proxy._reject(error)
-                raise error
-            for proxy, res in zip(self._proxies, results, strict=True):
-                proxy._resolve(res)
-        finally:
-            self._queries.clear()
-            self._proxies.clear()
-
-
-class OperationProxy:
-    """Proxy handle that resolves to an ExecutionResult after QQLBatch exits."""
-
-    def __init__(self) -> None:
-        self._result: ExecutionResult | None = None
-        self._exception: RuntimeError | None = None
-
-    def _resolve(self, result: ExecutionResult) -> None:
-        self._result = result
-
-    def _reject(self, exception: RuntimeError) -> None:
-        self._exception = exception
-
-    @property
-    def result(self) -> ExecutionResult:
-        """The resolved ExecutionResult."""
-        if self._exception is not None:
-            raise self._exception
-        if self._result is None:
-            raise RuntimeError("Batch has not been executed yet.")
-        return self._result

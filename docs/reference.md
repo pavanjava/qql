@@ -5,7 +5,7 @@ title: "Reference"
 
 # Reference — Models, Config, Project Structure, Errors
 
-Default embedding models, configuration parameters, public APIs, project layout, and common error codes for troubleshooting.
+Default embedding models, configuration parameters, project layout, and common error codes for troubleshooting.
 
 ---
 
@@ -149,48 +149,23 @@ You can edit this file directly to change the default model without reconnecting
 
 ---
 
-## Public Python API
-
-| API | Description |
-|---|---|
-| `Connection` | Stateful sync QQL client backed by `QdrantClient` |
-| `AsyncConnection` | Stateful async QQL client backed by `AsyncQdrantClient` |
-| `QQLBatch` | Sync context manager for collecting statements and resolving per-statement results after execution |
-| `QQLAsyncBatch` | Async context manager equivalent of `QQLBatch` |
-| `Executor` | Low-level sync AST executor |
-| `AsyncExecutor` | Low-level async AST executor |
-| `ExecutionResult` | Standard result object returned by all operations |
-
-Both sync and async connections support:
-
-- `run_query(query)`
-- `run_queries_batch([query, ...])`
-- `run_parameterized_query(template, params)`
-- `run_parameterized_batch(template, [params, ...])`
-- `prefer_grpc=True` and `grpc_port=<port>` connection options
-
----
-
 ## Project Structure
 
-```text
+```
 qql/
 ├── pyproject.toml          # Package config; installs the `qql` CLI command
 ├── src/
 │   └── qql/
-│       ├── __init__.py     # Public API exports: sync, async, batching, parser/executor
+│       ├── __init__.py     # Public API: Connection, run_query()
 │       ├── cli.py          # CLI entry point: connect, disconnect, execute, dump, REPL
 │       ├── config.py       # QQLConfig dataclass + ~/.qql/config.json I/O
-│       ├── connection.py   # Sync Connection, QQLBatch, parameterized query helpers
-│       ├── async_connection.py # AsyncConnection and QQLAsyncBatch
+│       ├── connection.py   # Connection class — stateful programmatic API
 │       ├── exceptions.py   # QQLError, QQLSyntaxError, QQLRuntimeError
 │       ├── lexer.py        # Tokenizer: string → List[Token]
 │       ├── ast_nodes.py    # Frozen dataclasses for each statement and filter type
 │       ├── parser.py       # Recursive descent parser: tokens → AST node
 │       ├── embedder.py     # Embedder (dense) + SparseEmbedder (BM25) + CrossEncoderEmbedder (rerank)
-│       ├── executor.py     # Sync AST node → Qdrant client call
-│       ├── async_executor.py # Async AST node → AsyncQdrantClient call
-│       ├── utils.py        # Shared pure helpers for parsing, filters, batching, vectors
+│       ├── executor.py     # AST node → Qdrant client call + filter + hybrid search
 │       ├── script.py       # Script runner: parse and execute .qql files statement by statement
 │       └── dumper.py       # Collection exporter: scroll all points → .qql INSERT BULK script
 └── tests/
@@ -198,7 +173,6 @@ qql/
     ├── test_parser.py      # Parser unit tests
     ├── test_executor.py    # Executor unit tests (mocked Qdrant client)
     ├── test_connection.py  # Connection class unit tests (mocked Qdrant client)
-    ├── test_async_connection.py # AsyncConnection / AsyncExecutor tests
     ├── test_script.py      # Script runner unit tests
     └── test_dumper.py      # Dumper unit tests
 ```
@@ -213,7 +187,7 @@ Tests do not require a running Qdrant instance — the Qdrant client is mocked.
 pytest tests/ -v
 ```
 
-Expected output: **635 tests passing**.
+Expected output: **604 tests passing**.
 
 ---
 
@@ -246,6 +220,3 @@ Expected output: **635 tests passing**.
 | `Unknown index type '...'` | Invalid schema type in CREATE INDEX | Use one of: `keyword`, `integer`, `float`, `bool`, `text`, `geo`, `datetime`, `uuid` |
 | `Unknown CREATE INDEX option '...'` | Unsupported advanced option for the chosen payload index type | Check which `WITH { ... }` keys are supported for `keyword`, `uuid`, or `text` |
 | `Qdrant error during CREATE INDEX: ...` | Qdrant rejected the index creation | Check field name and collection state |
-| `Unterminated batch block; expected END BATCH` | A `BEGIN BATCH` block was not closed | Add `END BATCH` at the end of the block |
-| `Batch has not been executed yet.` | Read a `QQLBatch` proxy result before leaving the context manager | Access `.result` only after the `with QQLBatch(...)` block exits |
-| `AsyncBatch has not been executed yet.` | Read a `QQLAsyncBatch` proxy result before leaving the async context manager | Access `.result` only after the `async with QQLAsyncBatch(...)` block exits |

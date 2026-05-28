@@ -30,7 +30,6 @@ _STMT_STARTERS = {
     TokenKind.SEARCH,
     TokenKind.RECOMMEND,
     TokenKind.DELETE,
-    TokenKind.BEGIN,
 }
 
 _DEPTH_OPEN  = {TokenKind.LBRACE, TokenKind.LBRACKET, TokenKind.LPAREN}
@@ -85,14 +84,13 @@ def split_statements(tokens: list[Token]) -> list[list[Token]]:
     """Split a flat token list into per-statement chunks.
 
     A new chunk begins whenever a statement-starter keyword (INSERT, CREATE,
-    DROP, SHOW, SCROLL, SELECT, SEARCH, RECOMMEND, DELETE, BEGIN) is encountered at
-    brace/bracket/paren depth 0 and batch_depth 0.
+    DROP, SHOW, SCROLL, SELECT, SEARCH, RECOMMEND, DELETE) is encountered at
+    brace/bracket/paren depth 0.
     The EOF sentinel is consumed and never included in any chunk.
     """
     chunks: list[list[Token]] = []
     current: list[Token] = []
     depth = 0
-    batch_depth = 0
 
     for tok in tokens:
         if tok.kind == TokenKind.EOF:
@@ -102,15 +100,10 @@ def split_statements(tokens: list[Token]) -> list[list[Token]]:
         elif tok.kind in _DEPTH_CLOSE:
             depth -= 1
 
-        # New statement starts when we see a starter at the top level outside of a batch block
-        if tok.kind in _STMT_STARTERS and depth == 0 and batch_depth == 0 and current:
+        # New statement starts when we see a starter at the top level
+        if tok.kind in _STMT_STARTERS and depth == 0 and current:
             chunks.append(current)
             current = []
-
-        if tok.kind == TokenKind.BEGIN:
-            batch_depth += 1
-        elif tok.kind == TokenKind.END:
-            batch_depth -= 1
 
         current.append(tok)
 

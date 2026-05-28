@@ -42,16 +42,9 @@ from .ast_nodes import (
     UpdatePayloadStmt,
     VectorsConfig,
     HnswRuntimeConfig,
-    BatchBlockStmt,
 )
 from .exceptions import QQLSyntaxError
 from .lexer import Token, TokenKind
-from .utils import (
-    parse_search_group_by,
-    parse_search_lookup,
-    parse_search_using,
-    parse_search_with,
-)
 
 # Comparison operator token → string symbol mapping
 _CMP_OPS: dict[TokenKind, str] = {
@@ -63,6 +56,9 @@ _CMP_OPS: dict[TokenKind, str] = {
     TokenKind.LTE:        "<=",
 }
 
+_HYBRID_FUSION_VALUES = {"rrf", "dbsf"}
+
+
 class Parser:
     def __init__(self, tokens: list[Token]) -> None:
         self._tokens = tokens
@@ -71,67 +67,36 @@ class Parser:
     # ── Public entry point ────────────────────────────────────────────────
 
     def parse(self) -> ASTNode:
-        node = self._parse_single_statement()
-        while self._peek().kind == TokenKind.SEMICOLON:
-            self._advance()
-        self._expect(TokenKind.EOF)
-        return node
-
-    def _parse_single_statement(self) -> ASTNode:
         tok = self._peek()
         if tok.kind == TokenKind.INSERT:
-            return self._parse_insert()
+            node = self._parse_insert()
         elif tok.kind == TokenKind.CREATE:
-            return self._parse_create()
+            node = self._parse_create()
         elif tok.kind == TokenKind.ALTER:
-            return self._parse_alter()
+            node = self._parse_alter()
         elif tok.kind == TokenKind.DROP:
-            return self._parse_drop()
+            node = self._parse_drop()
         elif tok.kind == TokenKind.SHOW:
-            return self._parse_show()
+            node = self._parse_show()
         elif tok.kind == TokenKind.SCROLL:
-            return self._parse_scroll()
+            node = self._parse_scroll()
         elif tok.kind == TokenKind.SELECT:
-            return self._parse_select()
+            node = self._parse_select()
         elif tok.kind == TokenKind.SEARCH:
-            return self._parse_search()
+            node = self._parse_search()
         elif tok.kind == TokenKind.RECOMMEND:
-            return self._parse_recommend()
+            node = self._parse_recommend()
         elif tok.kind == TokenKind.DELETE:
-            return self._parse_delete()
+            node = self._parse_delete()
         elif tok.kind == TokenKind.UPDATE:
-            return self._parse_update()
-        elif tok.kind == TokenKind.BEGIN:
-            return self._parse_batch_block()
+            node = self._parse_update()
         else:
             raise QQLSyntaxError(
                 f"Unexpected token '{tok.value}'; expected a QQL statement keyword",
                 tok.pos,
             )
-
-    def _parse_batch_block(self) -> BatchBlockStmt:
-        self._expect(TokenKind.BEGIN)
-        self._expect(TokenKind.BATCH)
-        statements = []
-        while True:
-            while self._peek().kind == TokenKind.SEMICOLON:
-                self._advance()
-            
-            if self._peek().kind == TokenKind.END:
-                self._advance()
-                self._expect(TokenKind.BATCH)
-                break
-                
-            if self._peek().kind == TokenKind.EOF:
-                raise QQLSyntaxError("Unterminated batch block; expected END BATCH", self._peek().pos)
-                
-            stmt = self._parse_single_statement()
-            statements.append(stmt)
-            
-            if self._peek().kind == TokenKind.SEMICOLON:
-                self._advance()
-                
-        return BatchBlockStmt(statements=tuple(statements))
+        self._expect(TokenKind.EOF)
+        return node
 
     # ── Statement parsers ─────────────────────────────────────────────────
 
@@ -731,14 +696,80 @@ class Parser:
             self._expect(TokenKind.THRESHOLD)
             score_threshold = float(self._parse_number())
 
-        lookup_from = parse_search_lookup(self)
+        lookup_from: tuple[str, str | None] | None = None
+        if self._peek().kind == TokenKind.LOOKUP:
+            self._advance()
+            self._expect(TokenKind.FROM)
+            lookup_collection = self._parse_identifier()
+            lookup_vector: str | None = None
+            if self._peek().kind == TokenKind.VECTOR:
+                self._advance()
+                lookup_vector = self._expect(TokenKind.STRING).value
+            lookup_from = (lookup_collection, lookup_vector)
 
         with_clause: SearchWith | None = None
         if self._peek().kind == TokenKind.EXACT:
             self._advance()
             with_clause = SearchWith(exact=True)
 
-        using = parse_search_using(self)
+        model: str | None = None
+        hybrid: bool = False
+        fusion: str | None = None
+        sparse_only: bool = False
+        sparse_model: str | None = None
+        dense_vector: str | None = None
+        sparse_vector: str | None = None
+        if self._peek().kind == TokenKind.USING:
+            self._advance()  # consume USING
+            if self._peek().kind == TokenKind.HYBRID:
+                self._advance()  # consume HYBRID
+                hybrid = True
+                # Optional FUSION / DENSE|SPARSE MODEL|VECTOR sub-clauses, any order.
+                while self._peek().kind in (TokenKind.FUSION, TokenKind.DENSE, TokenKind.SPARSE):
+                    sub = self._advance()
+                    if sub.kind == TokenKind.FUSION:
+                        value_tok = self._expect(TokenKind.STRING)
+                        fusion = value_tok.value.lower()
+                        if fusion not in _HYBRID_FUSION_VALUES:
+                            raise QQLSyntaxError(
+                                f"Unsupported hybrid fusion '{value_tok.value}'; expected 'rrf' or 'dbsf'",
+                                value_tok.pos,
+                            )
+                        continue
+                    if self._peek().kind == TokenKind.MODEL:
+                        self._advance()
+                        m = self._expect(TokenKind.STRING).value
+                        if sub.kind == TokenKind.DENSE:
+                            model = m
+                        else:
+                            sparse_model = m
+                    elif self._peek().kind == TokenKind.VECTOR:
+                        self._advance()
+                        name = self._expect(TokenKind.STRING).value
+                        if sub.kind == TokenKind.DENSE:
+                            dense_vector = name
+                        else:
+                            sparse_vector = name
+                    else:
+                        raise QQLSyntaxError(
+                            "Expected MODEL or VECTOR after DENSE/SPARSE in USING HYBRID",
+                            self._peek().pos,
+                        )
+            elif self._peek().kind == TokenKind.SPARSE:
+                self._advance()  # consume SPARSE
+                sparse_only = True
+                while self._peek().kind in (TokenKind.MODEL, TokenKind.VECTOR):
+                    sub = self._advance()
+                    if sub.kind == TokenKind.MODEL:
+                        sparse_model = self._expect(TokenKind.STRING).value
+                    else:
+                        sparse_vector = self._expect(TokenKind.STRING).value
+            elif self._peek().kind == TokenKind.VECTOR:
+                self._advance()
+                dense_vector = self._expect(TokenKind.STRING).value
+            else:
+                self._expect(TokenKind.MODEL)
+                model = self._expect(TokenKind.STRING).value
         query_filter: FilterExpr | None = None
         if self._peek().kind == TokenKind.WHERE:
             self._advance()  # consume WHERE
@@ -752,25 +783,79 @@ class Parser:
                 self._advance()  # consume MODEL
                 rerank_model = self._expect(TokenKind.STRING).value
         
-        with_clause = parse_search_with(self, with_clause)
-        group = parse_search_group_by(self, offset, rerank)
+        if self._peek().kind == TokenKind.EXACT:
+            self._advance()
+            if with_clause is None:
+                with_clause = SearchWith(exact=True)
+            else:
+                with_clause = SearchWith(
+                    hnsw_ef=with_clause.hnsw_ef,
+                    exact=True,
+                    acorn=with_clause.acorn,
+                    indexed_only=with_clause.indexed_only,
+                    quantization=with_clause.quantization,
+                    mmr_diversity=with_clause.mmr_diversity,
+                    mmr_candidates=with_clause.mmr_candidates,
+                )
+            
+        if self._peek().kind == TokenKind.WITH:
+            self._advance()  # consume WITH
+            parsed_with = self._parse_with_clause()
+            if with_clause is None:
+                with_clause = parsed_with
+            else:
+                with_clause = SearchWith(
+                    hnsw_ef=parsed_with.hnsw_ef or with_clause.hnsw_ef,
+                    exact=parsed_with.exact or with_clause.exact,
+                    acorn=parsed_with.acorn or with_clause.acorn,
+                    indexed_only=parsed_with.indexed_only or with_clause.indexed_only,
+                    quantization=parsed_with.quantization or with_clause.quantization,
+                    mmr_diversity=(
+                        parsed_with.mmr_diversity
+                        if parsed_with.mmr_diversity is not None
+                        else with_clause.mmr_diversity
+                    ),
+                    mmr_candidates=parsed_with.mmr_candidates or with_clause.mmr_candidates,
+                )
+        group_by: str | None = None
+        group_size: int = 3
+        if self._peek().kind == TokenKind.GROUP:
+            if offset > 0:
+                raise QQLSyntaxError("OFFSET cannot be used with GROUP BY", self._peek().pos)
+            self._advance()  # consume GROUP
+            self._expect(TokenKind.BY)
+            group_by = self._parse_field_path()
+            if rerank:
+                raise QQLSyntaxError(
+                    "GROUP BY and RERANK cannot be combined in the same SEARCH statement",
+                    self._peek().pos,
+                )
+            if self._peek().kind == TokenKind.GROUP_SIZE:
+                self._advance()  # consume GROUP_SIZE
+                gs_tok = self._peek()
+                group_size = int(self._expect(TokenKind.INTEGER).value)
+                if group_size <= 0:
+                    raise QQLSyntaxError(
+                        f"GROUP_SIZE must be a positive integer, got {group_size}",
+                        gs_tok.pos,
+                    )
         return SearchStmt(
             collection=collection,
             query_text=query_text,
             limit=limit,
-            model=using.model,
-            hybrid=using.hybrid,
-            fusion=using.fusion,
-            sparse_only=using.sparse_only,
-            sparse_model=using.sparse_model,
+            model=model,
+            hybrid=hybrid,
+            fusion=fusion,
+            sparse_only=sparse_only,
+            sparse_model=sparse_model,
             query_filter=query_filter,
             rerank=rerank,
             rerank_model=rerank_model,
             with_clause=with_clause,
-            group_by=group.group_by,
-            group_size=group.group_size,
-            dense_vector=using.dense_vector,
-            sparse_vector=using.sparse_vector,
+            group_by=group_by,
+            group_size=group_size,
+            dense_vector=dense_vector,
+            sparse_vector=sparse_vector,
             offset=offset,
             score_threshold=score_threshold,
             lookup_from=lookup_from,
@@ -1080,15 +1165,12 @@ class Parser:
             f"Expected a field name, got '{tok.value}'", tok.pos
         )
 
-    def _parse_literal(self) -> str | int | float | bool | None:
-        """STRING | INTEGER | FLOAT | boolean | NULL"""
+    def _parse_literal(self) -> str | int | float | bool:
+        """STRING | INTEGER | FLOAT | boolean"""
         tok = self._peek()
         if tok.kind == TokenKind.STRING:
             self._advance()
             return tok.value
-        if tok.kind == TokenKind.NULL:
-            self._advance()
-            return None
         if tok.kind == TokenKind.INTEGER:
             self._advance()
             return int(tok.value)
@@ -1104,7 +1186,7 @@ class Parser:
                 self._advance()
                 return False
         raise QQLSyntaxError(
-            f"Expected a literal value (string, integer, float, boolean, or null), got '{tok.value}'",
+            f"Expected a literal value (string, integer, float, or boolean), got '{tok.value}'",
             tok.pos,
         )
 
@@ -1121,10 +1203,10 @@ class Parser:
             f"Expected a number, got '{tok.value}'", tok.pos
         )
 
-    def _parse_literal_list(self) -> list[str | int | float | bool | None]:
+    def _parse_literal_list(self) -> list[str | int | float | bool]:
         """'(' literal { ',' literal } [','] ')'  — used by IN / NOT IN."""
         self._expect(TokenKind.LPAREN)
-        items: list[str | int | float | bool | None] = []
+        items: list[str | int | float | bool] = []
         if self._peek().kind == TokenKind.RPAREN:
             self._advance()
             return items
@@ -1278,9 +1360,9 @@ class Parser:
     def _parse_with_clause(self) -> SearchWith:
         self._expect(TokenKind.LBRACE)
         hnsw_ef: int | None = None
-        exact: bool | None = None
-        acorn: bool | None = None
-        indexed_only: bool | None = None
+        exact: bool = False
+        acorn: bool = False
+        indexed_only: bool = False
         quantization: QuantizationSearchWith | None = None
         mmr_diversity: float | None = None
         mmr_candidates: int | None = None
