@@ -11,10 +11,10 @@ QQL can be used as a Python library without the CLI.
 
 ## `Connection` — Primary API
 
-`Connection` is the recommended way to use QQL programmatically. It opens a
-single connection to Qdrant once and reuses it for every `run_query()` call —
-more efficient than the legacy `run_query()` function, which creates a new
-client on every invocation.
+`Connection` is the recommended sync API for using QQL programmatically. It
+opens a single connection to Qdrant once and reuses it for every `run_query()`
+call — more efficient than the legacy `run_query()` function, which creates a
+new client on every invocation.
 
 ### Basic usage
 
@@ -180,8 +180,54 @@ with Connection("http://localhost:6333") as conn:
 | `secret` | `str \| None` | `None` | API key; `None` for unauthenticated |
 | `default_model` | `str \| None` | `None` → `sentence-transformers/all-MiniLM-L6-v2` | Dense embedding model used when no `USING MODEL` clause is given |
 | `verify` | `bool \| str` | `True` | TLS verification setting; use `False` to skip verification or a CA bundle path for internal/self-signed certificates |
+| `prefer_grpc` | `bool` | `False` | Use Qdrant's gRPC transport when available |
+| `grpc_port` | `int` | `6334` | Qdrant gRPC port used when `prefer_grpc=True` |
 | `default_dense_vector_name` | `str` | `"dense"` | Dense vector name used when QQL creates a collection and no explicit `USING VECTOR` name is given |
 | `default_sparse_vector_name` | `str` | `"sparse"` | Sparse vector name used when QQL creates a hybrid collection and no explicit sparse vector name is given |
+
+### gRPC transport
+
+Pass `prefer_grpc=True` when your Qdrant deployment exposes the gRPC port:
+
+```python
+from qql import Connection
+
+with Connection("http://localhost:6333", prefer_grpc=True) as conn:
+    result = conn.run_query("SHOW COLLECTIONS")
+    print(result.data)
+```
+
+Use `grpc_port` when the deployment uses a non-default gRPC port.
+
+---
+
+## `AsyncConnection` — Async API
+
+`AsyncConnection` mirrors the sync `Connection` API and uses Qdrant's
+`AsyncQdrantClient` under the hood.
+
+```python
+from qql import AsyncConnection
+
+async with AsyncConnection("http://localhost:6333") as conn:
+    await conn.run_query(
+        "INSERT INTO COLLECTION notes VALUES {'text': 'hello async world'}"
+    )
+    result = await conn.run_query("SEARCH notes SIMILAR TO 'async' LIMIT 5")
+    for hit in result.data:
+        print(hit["score"], hit["payload"])
+```
+
+Async connections support the same `url`, `secret`, `default_model`, `verify`,
+`prefer_grpc`, and `grpc_port` parameters:
+
+```python
+async with AsyncConnection(
+    "http://localhost:6333",
+    prefer_grpc=True,
+) as conn:
+    result = await conn.run_query("SHOW COLLECTIONS")
+```
 
 ### Power-user: `executor` property
 
@@ -225,8 +271,8 @@ for hit in result.data:
     print(hit["score"], hit["payload"])
 ```
 
-`run_query()` accepts the same `url`, `secret`, `default_model`, and `verify`
-parameters as `Connection.__init__()`.
+`run_query()` accepts the same `url`, `secret`, `default_model`, `verify`,
+`prefer_grpc`, and `grpc_port` parameters as `Connection.__init__()`.
 
 ---
 

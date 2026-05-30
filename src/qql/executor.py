@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import time
-import uuid
 from dataclasses import dataclass
 from typing import Any
 
@@ -15,40 +14,23 @@ from qdrant_client.models import (
     CompressionRatio,
     Distance,
     Disabled,
-    FieldCondition,
     Filter,
-    Fusion,
     FusionQuery,
-    HasIdCondition,
     HnswConfigDiff,
-    IsEmptyCondition,
-    IsNullCondition,
     KeywordIndexParams,
     KeywordIndexType,
     Language,
     LookupLocation,
-    MatchAny,
-    MatchExcept,
-    MatchPhrase,
-    MatchText,
-    MatchTextAny,
-    MatchValue,
-    Mmr,
     Modifier,
-    NearestQuery,
     OptimizersConfigDiff,
-    PayloadField,
     PayloadSchemaType,
     PointStruct,
     PointVectors,
-    Prefetch,
     ProductQuantization,
     ProductQuantizationConfig,
     QuantizationSearchParams,
-    Range,
     RecommendInput,
     RecommendQuery,
-    RecommendStrategy,
     ScalarQuantization,
     ScalarQuantizationConfig,
     ScalarType,
@@ -72,28 +54,14 @@ from qdrant_client.models import (
 from .ast_nodes import (
     ASTNode,
     AlterCollectionStmt,
-    AndExpr,
-    BetweenExpr,
     CollectionConfig,
-    CompareExpr,
     CreateCollectionStmt,
     CreateIndexStmt,
     DeleteStmt,
     DropCollectionStmt,
     FilterExpr,
-    InExpr,
     InsertBulkStmt,
     InsertStmt,
-    IsEmptyExpr,
-    IsNotEmptyExpr,
-    IsNotNullExpr,
-    IsNullExpr,
-    MatchAnyExpr,
-    MatchPhraseExpr,
-    MatchTextExpr,
-    NotExpr,
-    NotInExpr,
-    OrExpr,
     QuantizationUpdate,
     QuantizationConfig,
     QuantizationType,
@@ -110,6 +78,21 @@ from .ast_nodes import (
 from .config import QQLConfig
 from .embedder import CrossEncoderEmbedder, Embedder, SparseEmbedder
 from .exceptions import QQLRuntimeError
+from .utils import (
+    build_dense_point_vector,
+    build_dense_query,
+    build_hybrid_prefetches,
+    build_qdrant_filter,
+    collection_topology_kwargs,
+    exclude_ids_from_filter,
+    extract_point_id_and_payload,
+    has_mmr,
+    is_grpc_not_found_error,
+    parse_recommend_strategy,
+    resolve_hybrid_fusion,
+    validate_search_mmr_usage,
+    wrap_as_filter,
+)
 
 _RERANK_FETCH_MULTIPLIER = 4
 _HYBRID_PREFETCH_MULTIPLIER = 4
@@ -255,6 +238,14 @@ class Executor:
             raise QQLRuntimeError(
                 f"Qdrant error fetching collection '{name}': {e}"
             ) from e
+        except ValueError as e:
+            if f"Collection {name} not found" in str(e):
+                return None
+            raise
+        except Exception as e:
+            if is_grpc_not_found_error(e):
+                return None
+            raise
 
     def _topology_from_collection_info(self, info: Any) -> CollectionTopology:
         """Parse a CollectionInfo object into a :class:`CollectionTopology`.
@@ -265,40 +256,7 @@ class Executor:
         params = info.config.params
         vectors = params.vectors  # type: ignore[union-attr]
         sparse_vectors = params.sparse_vectors or {}
-
-        if isinstance(vectors, dict):
-            dense_names = tuple(vectors.keys())
-            dense_sizes: tuple[tuple[str, int], ...] = tuple(
-                (k, v.size)
-                for k, v in vectors.items()
-                if getattr(v, "size", None) is not None
-            )
-            has_unnamed_dense = False
-            is_named_dense = True
-        elif vectors is None:
-            dense_names = ()
-            dense_sizes = ()
-            has_unnamed_dense = False
-            is_named_dense = False
-        else:
-            # Single unnamed dense vector
-            dense_names = ()
-            unnamed_size = getattr(vectors, "size", None)
-            dense_sizes = (("", unnamed_size),) if unnamed_size is not None else ()
-            has_unnamed_dense = True
-            is_named_dense = False
-
-        sparse_names = (
-            tuple(sparse_vectors.keys()) if isinstance(sparse_vectors, dict) else ()
-        )
-        return CollectionTopology(
-            exists=True,
-            is_named_dense=is_named_dense,
-            has_unnamed_dense=has_unnamed_dense,
-            dense_names=dense_names,
-            sparse_names=sparse_names,
-            dense_sizes=dense_sizes,
-        )
+        return CollectionTopology(**collection_topology_kwargs(vectors, sparse_vectors))
 
     def _resolve_topology(self, name: str) -> CollectionTopology:
         """Return the topology for *name* using exactly one Qdrant API call.
@@ -362,7 +320,7 @@ class Executor:
                     },
                 )
 
-            point_id, payload = self._extract_point_id_and_payload(node.values)
+            point_id, payload = extract_point_id_and_payload(node.values)
             try:
                 self._client.upsert(
                     collection_name=node.collection,
@@ -392,9 +350,14 @@ class Executor:
         self._ensure_collection(
             node.collection, len(vector), topology, node.dense_vector
         )
-        point_vector = self._build_dense_point_vector(topology, vector, node.dense_vector)
+        point_vector = build_dense_point_vector(
+            topology,
+            vector,
+            node.dense_vector,
+            self._default_dense_vector_name(),
+        )
 
-        point_id, payload = self._extract_point_id_and_payload(node.values)
+        point_id, payload = extract_point_id_and_payload(node.values)
 
         try:
             self._client.upsert(
@@ -443,7 +406,7 @@ class Executor:
             first_dense_vector: list[float] | None = None
             points: list[PointStruct] = []
             for vals in node.values_list:
-                point_id, payload = self._extract_point_id_and_payload(vals)
+                point_id, payload = extract_point_id_and_payload(vals)
                 dense_vector = dense_embedder.embed(vals["text"])
                 if first_dense_vector is None:
                     first_dense_vector = dense_vector
@@ -483,6 +446,7 @@ class Executor:
             return ExecutionResult(
                 success=True,
                 message=f"Inserted {len(points)} points (hybrid)",
+                data={"ids": [p.id for p in points]},
             )
 
         # ── Standard dense-only bulk INSERT ───────────────────────────────
@@ -495,9 +459,12 @@ class Executor:
             vector = embedder.embed(vals["text"])
             if first_vector is None:
                 first_vector = vector
-            point_id, payload = self._extract_point_id_and_payload(vals)
-            point_vector = self._build_dense_point_vector(
-                topology, vector, node.dense_vector
+            point_id, payload = extract_point_id_and_payload(vals)
+            point_vector = build_dense_point_vector(
+                topology,
+                vector,
+                node.dense_vector,
+                self._default_dense_vector_name(),
             )
             points.append(
                 PointStruct(id=point_id, vector=point_vector, payload=payload)
@@ -520,6 +487,7 @@ class Executor:
         return ExecutionResult(
             success=True,
             message=f"Inserted {len(points)} points",
+            data={"ids": [p.id for p in points]},
         )
 
     def _execute_create(self, node: CreateCollectionStmt) -> ExecutionResult:
@@ -889,7 +857,7 @@ class Executor:
             )
 
         search_params = self._build_search_params(node.with_clause)
-        self._validate_search_mmr_usage(node)
+        validate_search_mmr_usage(node)
 
         # When reranking is requested, fetch more candidates so the reranker has
         # enough material to reorder; only `node.limit` results are returned.
@@ -919,21 +887,15 @@ class Executor:
             try:
                 response = self._client.query_points(
                     collection_name=node.collection,
-                    prefetch=[
-                        Prefetch(
-                            query=self._build_dense_query(dense_vector, node.with_clause),
-                            using=topology.dense_using(node.dense_vector),
-                            limit=node.limit * _HYBRID_PREFETCH_MULTIPLIER,
-                            params=search_params,
-                        ),
-                        Prefetch(
-                            query=sparse_vector,
-                            using=topology.sparse_using(node.sparse_vector),
-                            limit=node.limit * _HYBRID_PREFETCH_MULTIPLIER,
-                            params=search_params,
-                        ),
-                    ],
-                    query=FusionQuery(fusion=self._resolve_hybrid_fusion(node.fusion)),
+                    prefetch=build_hybrid_prefetches(
+                        topology,
+                        node,
+                        dense_vector,
+                        sparse_vector,
+                        search_params,
+                        _HYBRID_PREFETCH_MULTIPLIER,
+                    ),
+                    query=FusionQuery(fusion=resolve_hybrid_fusion(node.fusion)),
                     limit=fetch_limit,
                     offset=node.offset or None,
                     query_filter=qdrant_filter,
@@ -1015,7 +977,7 @@ class Executor:
             query_using = topology.dense_using(node.dense_vector)
             response = self._client.query_points(
                 collection_name=node.collection,
-                query=self._build_dense_query(vector, node.with_clause),
+                query=build_dense_query(vector, node.with_clause),
                 using=query_using,
                 limit=fetch_limit,
                 offset=node.offset or None,
@@ -1066,15 +1028,6 @@ class Executor:
         )
         return dense_vector, sparse_vector
 
-    def _resolve_hybrid_fusion(self, fusion: str | None) -> Fusion:
-        if fusion is None or fusion == "rrf":
-            return Fusion.RRF
-        if fusion == "dbsf":
-            return Fusion.DBSF
-        raise QQLRuntimeError(
-            f"Unsupported hybrid fusion '{fusion}'; expected 'rrf' or 'dbsf'"
-        )
-
     def _execute_recommend(self, node: RecommendStmt) -> ExecutionResult:
         if not self._client.collection_exists(node.collection):
             raise QQLRuntimeError(f"Collection '{node.collection}' does not exist")
@@ -1084,7 +1037,7 @@ class Executor:
             qdrant_filter = self._wrap_as_filter(
                 self._build_qdrant_filter(node.query_filter)
             )
-        qdrant_filter = self._exclude_ids_from_filter(
+        qdrant_filter = exclude_ids_from_filter(
             qdrant_filter,
             [*node.positive_ids, *node.negative_ids],
         )
@@ -1092,11 +1045,11 @@ class Executor:
         recommend_input = RecommendInput(
             positive=list(node.positive_ids),
             negative=list(node.negative_ids) or None,
-            strategy=self._parse_recommend_strategy(node.strategy),
+            strategy=parse_recommend_strategy(node.strategy),
         )
 
         search_params = self._build_search_params(node.with_clause)
-        if self._has_mmr(node.with_clause):
+        if has_mmr(node.with_clause):
             raise QQLRuntimeError("MMR is supported only for SEARCH statements")
 
         lookup_from: LookupLocation | None = None
@@ -1501,107 +1454,6 @@ class Executor:
             return f", quantization={quantization.config.type.value}"
         return ""
 
-    def _has_mmr(self, with_clause: SearchWith | None) -> bool:
-        return with_clause is not None and (
-            with_clause.mmr_diversity is not None or with_clause.mmr_candidates is not None
-        )
-
-    def _validate_search_mmr_usage(self, node: SearchStmt) -> None:
-        if not self._has_mmr(node.with_clause):
-            return
-        if node.sparse_only:
-            raise QQLRuntimeError("MMR is not supported with USING SPARSE yet")
-
-    def _build_dense_query(
-        self,
-        vector: list[float],
-        with_clause: SearchWith | None,
-    ) -> list[float] | NearestQuery:
-        if not self._has_mmr(with_clause):
-            return vector
-        return NearestQuery(
-            nearest=vector,
-            mmr=Mmr(
-                diversity=with_clause.mmr_diversity,
-                candidates_limit=with_clause.mmr_candidates,
-            ),
-        )
-
-    def _parse_recommend_strategy(
-        self, strategy: str | None
-    ) -> RecommendStrategy | None:
-        if strategy is None:
-            return None
-        try:
-            return RecommendStrategy(strategy)
-        except ValueError as e:
-            raise QQLRuntimeError(
-                "Unknown recommend strategy "
-                f"'{strategy}'. Expected one of: average_vector, best_score, sum_scores"
-            ) from e
-
-    def _exclude_ids_from_filter(
-        self,
-        query_filter: Filter | None,
-        point_ids: list[str | int],
-    ) -> Filter | None:
-        if not point_ids:
-            return query_filter
-
-        exclude_condition = HasIdCondition(has_id=point_ids)
-        if query_filter is None:
-            return Filter(must_not=[exclude_condition])
-
-        return Filter(
-            must=list(query_filter.must or []),
-            should=list(query_filter.should or []),
-            must_not=[*(query_filter.must_not or []), exclude_condition],
-            min_should=query_filter.min_should,
-        )
-
-    def _extract_point_id_and_payload(
-        self, values: dict[str, Any]
-    ) -> tuple[str | int, dict[str, Any]]:
-        payload = dict(values)
-        if "id" not in payload:
-            return str(uuid.uuid4()), payload
-
-        point_id = payload.pop("id")
-        if isinstance(point_id, bool):
-            raise QQLRuntimeError(
-                "INSERT id must be an unsigned integer or UUID string when provided"
-            )
-        if isinstance(point_id, int):
-            if point_id < 0:
-                raise QQLRuntimeError(
-                    "INSERT id must be an unsigned integer or UUID string when provided"
-                )
-            return point_id, payload
-        if isinstance(point_id, str):
-            try:
-                uuid.UUID(point_id)
-            except ValueError as e:
-                raise QQLRuntimeError(
-                    "INSERT id must be an unsigned integer or UUID string when provided"
-                ) from e
-            return point_id, payload
-        raise QQLRuntimeError(
-            "INSERT id must be an unsigned integer or UUID string when provided"
-        )
-
-    def _build_dense_point_vector(
-        self,
-        topology: CollectionTopology,
-        vector: list[float],
-        explicit_vector: str | None,
-    ) -> list[float] | dict[str, list[float]]:
-        if not topology.exists:
-            return {explicit_vector or self._default_dense_vector_name(): vector}
-        vector_name = topology.dense_payload_name(explicit_vector)
-        if vector_name is None:
-            return vector
-        return {vector_name: vector}
-
     def _apply_reranking(
         self,
         query: str,
@@ -1680,21 +1532,15 @@ class Executor:
                 response = self._client.query_points_groups(
                     collection_name=node.collection,
                     group_by=node.group_by,
-                    prefetch=[
-                        Prefetch(
-                            query=self._build_dense_query(dense_vector, node.with_clause),
-                            using=topology.dense_using(node.dense_vector),
-                            limit=node.limit * _HYBRID_PREFETCH_MULTIPLIER,
-                            params=search_params,
-                        ),
-                        Prefetch(
-                            query=sparse_vector,
-                            using=topology.sparse_using(node.sparse_vector),
-                            limit=node.limit * _HYBRID_PREFETCH_MULTIPLIER,
-                            params=search_params,
-                        ),
-                    ],
-                    query=FusionQuery(fusion=self._resolve_hybrid_fusion(node.fusion)),
+                    prefetch=build_hybrid_prefetches(
+                        topology,
+                        node,
+                        dense_vector,
+                        sparse_vector,
+                        search_params,
+                        _HYBRID_PREFETCH_MULTIPLIER,
+                    ),
+                    query=FusionQuery(fusion=resolve_hybrid_fusion(node.fusion)),
                     limit=node.limit,
                     group_size=node.group_size,
                     query_filter=qdrant_filter,
@@ -1729,7 +1575,7 @@ class Executor:
                 response = self._client.query_points_groups(
                     collection_name=node.collection,
                     group_by=node.group_by,
-                    query=self._build_dense_query(vector, node.with_clause),
+                    query=build_dense_query(vector, node.with_clause),
                     using=query_using,
                     limit=node.limit,
                     group_size=node.group_size,
@@ -1823,90 +1669,11 @@ class Executor:
         Returns one of: Filter, FieldCondition, IsNullCondition, IsEmptyCondition.
         Use _wrap_as_filter() to guarantee the top-level result is a Filter.
         """
-        # ── Logical combinators ───────────────────────────────────────────
-        if isinstance(expr, AndExpr):
-            return Filter(must=[self._build_qdrant_filter(op) for op in expr.operands])
-
-        if isinstance(expr, OrExpr):
-            return Filter(should=[self._build_qdrant_filter(op) for op in expr.operands])
-
-        if isinstance(expr, NotExpr):
-            return Filter(must_not=[self._build_qdrant_filter(expr.operand)])
-
-        # ── Comparison ────────────────────────────────────────────────────
-        if isinstance(expr, CompareExpr):
-            if expr.op == "=":
-                return FieldCondition(
-                    key=expr.field, match=MatchValue(value=expr.value)
-                )
-            if expr.op == "!=":
-                return Filter(
-                    must_not=[
-                        FieldCondition(key=expr.field, match=MatchValue(value=expr.value))
-                    ]
-                )
-            _range_key = {">": "gt", ">=": "gte", "<": "lt", "<=": "lte"}[expr.op]
-            return FieldCondition(
-                key=expr.field, range=Range(**{_range_key: expr.value})
-            )
-
-        # ── BETWEEN ───────────────────────────────────────────────────────
-        if isinstance(expr, BetweenExpr):
-            return FieldCondition(
-                key=expr.field, range=Range(gte=expr.low, lte=expr.high)
-            )
-
-        # ── IN / NOT IN ───────────────────────────────────────────────────
-        if isinstance(expr, InExpr):
-            return FieldCondition(
-                key=expr.field, match=MatchAny(any=list(expr.values))
-            )
-
-        if isinstance(expr, NotInExpr):
-            return FieldCondition(
-                key=expr.field,
-                match=MatchExcept(**{"except": list(expr.values)}),
-            )
-
-        # ── IS NULL / IS NOT NULL ─────────────────────────────────────────
-        if isinstance(expr, IsNullExpr):
-            return IsNullCondition(is_null=PayloadField(key=expr.field))
-
-        if isinstance(expr, IsNotNullExpr):
-            return Filter(
-                must_not=[IsNullCondition(is_null=PayloadField(key=expr.field))]
-            )
-
-        # ── IS EMPTY / IS NOT EMPTY ───────────────────────────────────────
-        if isinstance(expr, IsEmptyExpr):
-            return IsEmptyCondition(is_empty=PayloadField(key=expr.field))
-
-        if isinstance(expr, IsNotEmptyExpr):
-            return Filter(
-                must_not=[IsEmptyCondition(is_empty=PayloadField(key=expr.field))]
-            )
-
-        # ── Full-text MATCH ───────────────────────────────────────────────
-        if isinstance(expr, MatchTextExpr):
-            return FieldCondition(key=expr.field, match=MatchText(text=expr.text))
-
-        if isinstance(expr, MatchAnyExpr):
-            return FieldCondition(
-                key=expr.field, match=MatchTextAny(text_any=expr.text)
-            )
-
-        if isinstance(expr, MatchPhraseExpr):
-            return FieldCondition(
-                key=expr.field, match=MatchPhrase(phrase=expr.text)
-            )
-
-        raise QQLRuntimeError(f"Unknown filter expression type: {type(expr)}")
+        return build_qdrant_filter(expr)
 
     def _wrap_as_filter(self, qdrant_expr: Any) -> Filter:
         """Ensure the top-level expression is a Filter (required by query_points)."""
-        if isinstance(qdrant_expr, Filter):
-            return qdrant_expr
-        return Filter(must=[qdrant_expr])
+        return wrap_as_filter(qdrant_expr)
 
     # ── Collection helpers ────────────────────────────────────────────────
 

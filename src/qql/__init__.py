@@ -12,6 +12,8 @@ from .config import (
     QQLConfig,
     load_config,
 )
+from .async_connection import AsyncConnection
+from .async_executor import AsyncExecutor
 from .connection import Connection
 from .exceptions import QQLError, QQLRuntimeError, QQLSyntaxError
 from .executor import ExecutionResult, Executor
@@ -20,6 +22,8 @@ from .parser import Parser
 
 __all__ = [
     "__version__",
+    "AsyncConnection",
+    "AsyncExecutor",
     "Connection",
     "DEFAULT_DENSE_VECTOR_NAME",
     "DEFAULT_MODEL",
@@ -43,6 +47,8 @@ def run_query(
     secret: str | None = None,
     default_model: str | None = None,
     verify: bool | str = True,
+    prefer_grpc: bool = False,
+    grpc_port: int = 6334,
 ) -> ExecutionResult:
     """One-shot convenience function kept for backward compatibility.
 
@@ -61,5 +67,7 @@ def run_query(
         secret=secret,
         default_model=default_model,
         verify=verify,
+        prefer_grpc=prefer_grpc,
+        grpc_port=grpc_port,
     ) as conn:
         return conn.run_query(query)
