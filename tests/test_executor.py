@@ -87,13 +87,13 @@ def mock_embedder(mocker):
 
 
 class TestFetchCollectionInfo:
-    def test_non_not_found_value_error_is_wrapped(self, executor, mock_client):
+    def test_value_error_wrapped_as_qql_runtime_error(self, executor, mock_client):
         mock_client.get_collection.side_effect = ValueError("transport failed")
 
         with pytest.raises(QQLRuntimeError, match="Qdrant error fetching collection"):
             executor._fetch_collection_info("docs")
 
-    def test_non_not_found_exception_is_wrapped(self, executor, mock_client):
+    def test_runtime_error_wrapped_as_qql_runtime_error(self, executor, mock_client):
         mock_client.get_collection.side_effect = RuntimeError("transport failed")
 
         with pytest.raises(QQLRuntimeError, match="Qdrant error fetching collection"):

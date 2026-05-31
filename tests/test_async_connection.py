@@ -135,7 +135,7 @@ class TestAsyncConnectionLifecycle:
         mocker.patch("qql.async_connection.AsyncQdrantClient", return_value=mock_client)
         conn = AsyncConnection("http://localhost:6333")
         await conn.close()
-        mock_client.close.assert_called_once()
+        mock_client.close.assert_awaited_once()
 
     async def test_context_manager_closes_on_exit(self, mocker):
         mock_client = AsyncMock()
@@ -144,7 +144,7 @@ class TestAsyncConnectionLifecycle:
         async with AsyncConnection("http://localhost:6333") as conn:
             assert conn._client is mock_client
 
-        mock_client.close.assert_called_once()
+        mock_client.close.assert_awaited_once()
 
     async def test_context_manager_closes_on_exception(self, mocker):
         mock_client = AsyncMock()
@@ -154,7 +154,7 @@ class TestAsyncConnectionLifecycle:
             async with AsyncConnection("http://localhost:6333"):
                 raise RuntimeError("oops")
 
-        mock_client.close.assert_called_once()
+        mock_client.close.assert_awaited_once()
 
 
 # ── TestArchitecturalGapsClosed ────────────────────────────────────────────────
@@ -278,7 +278,10 @@ class TestArchitecturalGapsClosed:
             return val
             
         mocker.patch("qql.async_executor.AsyncExecutor._resolve_topology", side_effect=mock_resolve)
-        mocker.patch("qql.async_executor.AsyncExecutor._create_collection_and_wait", return_value=None)
+        create_collection = mocker.patch(
+            "qql.async_executor.AsyncExecutor._create_collection_and_wait",
+            new_callable=AsyncMock,
+        )
         
         from qql import QQLConfig
         executor = AsyncExecutor(mock_client, QQLConfig(url="http://localhost:6333"))
@@ -298,4 +301,4 @@ class TestArchitecturalGapsClosed:
         assert res1.success is True
         assert res2.success is True
         # Verify that _create_collection_and_wait was called exactly once despite concurrency!
-        executor._create_collection_and_wait.assert_called_once()
+        create_collection.assert_awaited_once()
