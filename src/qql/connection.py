@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from .config import DEFAULT_MODEL, QQLConfig
 from .executor import Executor, ExecutionResult
 from .lexer import Lexer
@@ -77,7 +79,11 @@ class Connection:
             default_model=default_model or DEFAULT_MODEL,
             verify=verify,
         )
-        client_kwargs = {"url": url, "api_key": secret, "verify": verify}
+        client_kwargs: dict[str, Any] = {
+            "url": url,
+            "api_key": secret,
+            "verify": verify,
+        }
         if prefer_grpc:
             client_kwargs["prefer_grpc"] = True
             client_kwargs["grpc_port"] = grpc_port

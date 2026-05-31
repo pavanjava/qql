@@ -241,11 +241,15 @@ class Executor:
         except ValueError as e:
             if f"Collection {name} not found" in str(e):
                 return None
-            raise
+            raise QQLRuntimeError(
+                f"Qdrant error fetching collection '{name}': {e}"
+            ) from e
         except Exception as e:
             if is_grpc_not_found_error(e):
                 return None
-            raise
+            raise QQLRuntimeError(
+                f"Qdrant error fetching collection '{name}': {e}"
+            ) from e
 
     def _topology_from_collection_info(self, info: Any) -> CollectionTopology:
         """Parse a CollectionInfo object into a :class:`CollectionTopology`.

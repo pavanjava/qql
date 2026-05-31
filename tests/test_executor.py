@@ -86,6 +86,20 @@ def mock_embedder(mocker):
     return mock_embed
 
 
+class TestFetchCollectionInfo:
+    def test_non_not_found_value_error_is_wrapped(self, executor, mock_client):
+        mock_client.get_collection.side_effect = ValueError("transport failed")
+
+        with pytest.raises(QQLRuntimeError, match="Qdrant error fetching collection"):
+            executor._fetch_collection_info("docs")
+
+    def test_non_not_found_exception_is_wrapped(self, executor, mock_client):
+        mock_client.get_collection.side_effect = RuntimeError("transport failed")
+
+        with pytest.raises(QQLRuntimeError, match="Qdrant error fetching collection"):
+            executor._fetch_collection_info("docs")
+
+
 class TestInsert:
     def test_insert_creates_collection_when_missing(self, executor, mock_client):
         node = InsertStmt(collection="notes", values={"text": "hello"}, model=None)

@@ -83,7 +83,7 @@ class TestAsyncConnectionRunQuery:
 
         conn = AsyncConnection("http://localhost:6333")
         await conn.run_query("SHOW COLLECTIONS")
-        mock_executor.execute.assert_called_once()
+        mock_executor.execute.assert_awaited_once()
 
     async def test_executor_instance_reused_across_queries(self, mocker):
         """AsyncExecutor() is constructed once; run_query() never re-instantiates it."""
@@ -102,7 +102,7 @@ class TestAsyncConnectionRunQuery:
         # AsyncExecutor constructor called exactly once, not once per query
         executor_cls.assert_called_once()
         # But execute() called three times
-        assert mock_executor.execute.call_count == 3
+        assert mock_executor.execute.await_count == 3
 
     async def test_invalid_query_raises_qql_syntax_error(self, mocker):
         mocker.patch("qql.async_connection.AsyncQdrantClient")
