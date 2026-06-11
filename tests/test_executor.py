@@ -1272,6 +1272,7 @@ class TestSearch:
         mock_response = mocker.MagicMock()
         mock_response.points = []
         mock_client.query_points.return_value = mock_response
+        mocker.patch("qql.executor.SparseEmbedder", return_value=mocker.MagicMock())
 
         node = SearchStmt(
             collection="notes",
@@ -3606,7 +3607,7 @@ class TestCollectionMetadataFetchCount:
         mock_client.get_collection.assert_called_once()
 
     def test_insert_existing_hybrid_collection_fetches_metadata_once(
-        self, executor, mock_client
+        self, executor, mock_client, mocker
     ):
         """Hybrid auto-detect INSERT must call get_collection() exactly once."""
         from qdrant_client.models import Distance, SparseVectorParams, VectorParams
@@ -3618,6 +3619,7 @@ class TestCollectionMetadataFetchCount:
         mock_client.get_collection.return_value.config.params.sparse_vectors = {
             "sparse": SparseVectorParams()
         }
+        mocker.patch("qql.executor.SparseEmbedder", return_value=mocker.MagicMock())
 
         node = InsertStmt(collection="docs", values={"text": "hello"}, model=None)
         executor.execute(node)

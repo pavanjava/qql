@@ -1351,8 +1351,8 @@ class Executor:
             hnsw_ef=with_clause.hnsw_ef,
             exact=with_clause.exact,
             quantization=quantization,
-            indexed_only=True if with_clause.indexed_only else None,
-            acorn=AcornSearchParams(enable=True) if with_clause.acorn else None,
+            indexed_only=with_clause.indexed_only if with_clause.indexed_only is not None else None,
+            acorn=AcornSearchParams(enable=with_clause.acorn) if with_clause.acorn is not None else None,
         )
 
     def _build_hnsw_config(self, config: CollectionConfig | None) -> HnswConfigDiff | None:

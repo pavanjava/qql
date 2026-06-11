@@ -240,11 +240,14 @@ def connect(
         client_kwargs["prefer_grpc"] = True
         client_kwargs["grpc_port"] = grpc_port
 
+    client = None
     try:
         client = QdrantClient(**client_kwargs)
         client.get_collections()
     except Exception as e:
         err_console.print(f"[bold red]Connection failed:[/bold red] {e}")
+        if client is not None:
+            client.close()
         sys.exit(1)
     else:
         client.close()

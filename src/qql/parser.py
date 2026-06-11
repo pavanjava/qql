@@ -806,9 +806,9 @@ class Parser:
             else:
                 with_clause = SearchWith(
                     hnsw_ef=parsed_with.hnsw_ef or with_clause.hnsw_ef,
-                    exact=parsed_with.exact or with_clause.exact,
-                    acorn=parsed_with.acorn or with_clause.acorn,
-                    indexed_only=parsed_with.indexed_only or with_clause.indexed_only,
+                    exact=parsed_with.exact if parsed_with.exact is not None else with_clause.exact,
+                    acorn=parsed_with.acorn if parsed_with.acorn is not None else with_clause.acorn,
+                    indexed_only=parsed_with.indexed_only if parsed_with.indexed_only is not None else with_clause.indexed_only,
                     quantization=parsed_with.quantization or with_clause.quantization,
                     mmr_diversity=(
                         parsed_with.mmr_diversity
@@ -1363,9 +1363,9 @@ class Parser:
     def _parse_with_clause(self) -> SearchWith:
         self._expect(TokenKind.LBRACE)
         hnsw_ef: int | None = None
-        exact: bool = False
-        acorn: bool = False
-        indexed_only: bool = False
+        exact: bool | None = None
+        acorn: bool | None = None
+        indexed_only: bool | None = None
         quantization: QuantizationSearchWith | None = None
         mmr_diversity: float | None = None
         mmr_candidates: int | None = None
