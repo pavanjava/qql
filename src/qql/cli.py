@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+from typing import Any
 
 import click
 from prompt_toolkit import PromptSession
@@ -17,6 +18,20 @@ from .parser import Parser
 
 console = Console()
 err_console = Console(stderr=True)
+
+
+def _client_kwargs_from_cfg(cfg: QQLConfig) -> dict[str, Any]:
+    """Build QdrantClient keyword arguments from a QQLConfig."""
+    kwargs: dict[str, Any] = {
+        "url": cfg.url,
+        "api_key": cfg.secret,
+        "verify": cfg.verify,
+    }
+    if cfg.prefer_grpc:
+        kwargs["prefer_grpc"] = True
+        kwargs["grpc_port"] = cfg.grpc_port
+    return kwargs
+
 
 HELP_TEXT = """
 [bold cyan]QQL — Qdrant Query Language[/bold cyan]
@@ -185,11 +200,26 @@ def main(ctx: click.Context) -> None:
     type=click.Path(exists=True, readable=True, dir_okay=False, resolve_path=True),
     help="Path to a custom CA certificate bundle (PEM).",
 )
+@click.option(
+    "--prefer-grpc",
+    is_flag=True,
+    default=False,
+    help="Connect via gRPC transport instead of HTTP.",
+)
+@click.option(
+    "--grpc-port",
+    type=int,
+    default=6334,
+    show_default=True,
+    help="gRPC port of the Qdrant instance.",
+)
 def connect(
     url: str,
     secret: str | None,
     verify: bool,
     ca_cert: str | None,
+    prefer_grpc: bool,
+    grpc_port: int,
 ) -> None:
     """Connect to a Qdrant instance and launch the QQL shell."""
     from qdrant_client import QdrantClient
@@ -201,8 +231,17 @@ def connect(
 
     console.print(f"Connecting to [bold]{url}[/bold]...")
 
+    client_kwargs: dict[str, Any] = {
+        "url": url,
+        "api_key": secret,
+        "verify": verify_val,
+    }
+    if prefer_grpc:
+        client_kwargs["prefer_grpc"] = True
+        client_kwargs["grpc_port"] = grpc_port
+
     try:
-        client = QdrantClient(url=url, api_key=secret, verify=verify_val)
+        client = QdrantClient(**client_kwargs)
         client.get_collections()
     except Exception as e:
         err_console.print(f"[bold red]Connection failed:[/bold red] {e}")
@@ -210,7 +249,10 @@ def connect(
     else:
         client.close()
 
-    cfg = QQLConfig(url=url, secret=secret, verify=verify_val)
+    cfg = QQLConfig(
+        url=url, secret=secret, verify=verify_val,
+        prefer_grpc=prefer_grpc, grpc_port=grpc_port,
+    )
     save_config(cfg)
     console.print("[bold green]Connected.[/bold green] Config saved to ~/.qql/config.json\n")
     _launch_repl(cfg)
@@ -252,7 +294,7 @@ def execute(file: str, stop_on_error: bool) -> None:
         sys.exit(1)
 
     try:
-        client = QdrantClient(url=cfg.url, api_key=cfg.secret, verify=cfg.verify)
+        client = QdrantClient(**_client_kwargs_from_cfg(cfg))
         client.get_collections()
     except Exception as e:
         err_console.print(f"[bold red]Connection failed:[/bold red] {e}")
@@ -310,7 +352,7 @@ def dump(collection: str, output: str, batch_size: int) -> None:
         sys.exit(1)
 
     try:
-        client = QdrantClient(url=cfg.url, api_key=cfg.secret, verify=cfg.verify)
+        client = QdrantClient(**_client_kwargs_from_cfg(cfg))
         client.get_collections()
     except Exception as e:
         err_console.print(f"[bold red]Connection failed:[/bold red] {e}")
@@ -343,7 +385,7 @@ def _launch_repl(cfg: QQLConfig) -> None:
     from qdrant_client import QdrantClient
 
     try:
-        client = QdrantClient(url=cfg.url, api_key=cfg.secret, verify=cfg.verify)
+        client = QdrantClient(**_client_kwargs_from_cfg(cfg))
         client.get_collections()
     except Exception as e:
         err_console.print(f"[bold red]Could not connect to {cfg.url}:[/bold red] {e}")

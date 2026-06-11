@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from .config import DEFAULT_MODEL, QQLConfig
 from .executor import Executor, ExecutionResult
 from .lexer import Lexer
@@ -52,6 +54,8 @@ class Connection:
         secret: str | None = None,
         default_model: str | None = None,
         verify: bool | str = True,
+        prefer_grpc: bool = False,
+        grpc_port: int = 6334,
     ) -> None:
         """Create a connection to a Qdrant instance.
 
@@ -64,6 +68,8 @@ class Connection:
             verify: SSL certificate verification. Set to ``False`` to skip
                 verification for self-signed/internal certificates, or pass
                 a path to a custom CA bundle (default: ``True``).
+            prefer_grpc: Whether to connect via fast gRPC transport.
+            grpc_port: The gRPC port of Qdrant instance (default: 6334).
         """
         from qdrant_client import QdrantClient
 
@@ -72,8 +78,18 @@ class Connection:
             secret=secret,
             default_model=default_model or DEFAULT_MODEL,
             verify=verify,
+            prefer_grpc=prefer_grpc,
+            grpc_port=grpc_port,
         )
-        self._client = QdrantClient(url=url, api_key=secret, verify=verify)
+        client_kwargs: dict[str, Any] = {
+            "url": url,
+            "api_key": secret,
+            "verify": verify,
+        }
+        if prefer_grpc:
+            client_kwargs["prefer_grpc"] = True
+            client_kwargs["grpc_port"] = grpc_port
+        self._client = QdrantClient(**client_kwargs)
         self._executor = Executor(self._client, self._config)
 
     # ── Public API ────────────────────────────────────────────────────────

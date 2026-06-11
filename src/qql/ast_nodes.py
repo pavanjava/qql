@@ -25,9 +25,9 @@ class QuantizationConfig:
 class SearchWith:
     """Query-time search params supported by Qdrant SearchParams."""
     hnsw_ef: int | None = None
-    exact: bool = False
-    acorn: bool = False
-    indexed_only: bool = False
+    exact: bool | None = None
+    acorn: bool | None = None
+    indexed_only: bool | None = None
     quantization: "QuantizationSearchWith | None" = None
     mmr_diversity: float | None = None
     mmr_candidates: int | None = None
@@ -99,7 +99,7 @@ class CompareExpr:
     """field op literal  — covers =, !=, >, >=, <, <="""
     field: str
     op: str   # one of: "=", "!=", ">", ">=", "<", "<="
-    value: str | int | float | bool
+    value: str | int | float | bool | None
 
 
 @dataclass(frozen=True)
@@ -114,14 +114,14 @@ class BetweenExpr:
 class InExpr:
     """field IN (v1, v2, ...)"""
     field: str
-    values: tuple[str | int | float | bool, ...]
+    values: tuple[str | int | float | bool | None, ...]
 
 
 @dataclass(frozen=True)
 class NotInExpr:
     """field NOT IN (v1, v2, ...)"""
     field: str
-    values: tuple[str | int | float | bool, ...]
+    values: tuple[str | int | float | bool | None, ...]
 
 
 @dataclass(frozen=True)

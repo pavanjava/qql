@@ -20,6 +20,8 @@ class QQLConfig:
     default_dense_vector_name: str = DEFAULT_DENSE_VECTOR_NAME
     default_sparse_vector_name: str = DEFAULT_SPARSE_VECTOR_NAME
     verify: bool | str = True
+    prefer_grpc: bool = False
+    grpc_port: int = 6334
 
 
 def save_config(cfg: QQLConfig) -> None:
@@ -45,6 +47,8 @@ def load_config() -> QQLConfig | None:
             "default_sparse_vector_name", DEFAULT_SPARSE_VECTOR_NAME
         ),
         verify=data.get("verify", True),
+        prefer_grpc=data.get("prefer_grpc", False),
+        grpc_port=data.get("grpc_port", 6334),
     )
 
 

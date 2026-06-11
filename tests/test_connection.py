@@ -44,6 +44,17 @@ class TestConnectionInit:
         )
         assert conn.config.verify == "/etc/ssl/internal-ca.pem"
 
+    def test_grpc_options_passed_to_qdrant_client(self, mocker):
+        mock_client_cls = mocker.patch("qdrant_client.QdrantClient")
+        Connection("http://localhost:6333", prefer_grpc=True, grpc_port=9999)
+        mock_client_cls.assert_called_once_with(
+            url="http://localhost:6333",
+            api_key=None,
+            verify=True,
+            prefer_grpc=True,
+            grpc_port=9999,
+        )
+
     def test_custom_default_model_stored_in_config(self, mocker):
         mocker.patch("qdrant_client.QdrantClient")
         conn = Connection("http://localhost:6333", default_model="BAAI/bge-small-en-v1.5")
@@ -174,7 +185,12 @@ class TestRunQueryBackwardCompat:
         conn_cls = mocker.patch("qql.Connection", return_value=conn_instance)
         run_query("SHOW COLLECTIONS", url="http://localhost:6333")
         conn_cls.assert_called_once_with(
-            url="http://localhost:6333", secret=None, default_model=None, verify=True
+            url="http://localhost:6333",
+            secret=None,
+            default_model=None,
+            verify=True,
+            prefer_grpc=False,
+            grpc_port=6334,
         )
         conn_instance.run_query.assert_called_once_with("SHOW COLLECTIONS")
 

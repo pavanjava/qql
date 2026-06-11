@@ -43,6 +43,8 @@ def run_query(
     secret: str | None = None,
     default_model: str | None = None,
     verify: bool | str = True,
+    prefer_grpc: bool = False,
+    grpc_port: int = 6334,
 ) -> ExecutionResult:
     """One-shot convenience function kept for backward compatibility.
 
@@ -61,5 +63,7 @@ def run_query(
         secret=secret,
         default_model=default_model,
         verify=verify,
+        prefer_grpc=prefer_grpc,
+        grpc_port=grpc_port,
     ) as conn:
         return conn.run_query(query)

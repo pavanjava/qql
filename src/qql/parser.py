@@ -1165,12 +1165,15 @@ class Parser:
             f"Expected a field name, got '{tok.value}'", tok.pos
         )
 
-    def _parse_literal(self) -> str | int | float | bool:
-        """STRING | INTEGER | FLOAT | boolean"""
+    def _parse_literal(self) -> str | int | float | bool | None:
+        """STRING | INTEGER | FLOAT | boolean | NULL"""
         tok = self._peek()
         if tok.kind == TokenKind.STRING:
             self._advance()
             return tok.value
+        if tok.kind == TokenKind.NULL:
+            self._advance()
+            return None
         if tok.kind == TokenKind.INTEGER:
             self._advance()
             return int(tok.value)
@@ -1186,7 +1189,7 @@ class Parser:
                 self._advance()
                 return False
         raise QQLSyntaxError(
-            f"Expected a literal value (string, integer, float, or boolean), got '{tok.value}'",
+            f"Expected a literal value (string, integer, float, boolean, or null), got '{tok.value}'",
             tok.pos,
         )
 
@@ -1203,10 +1206,10 @@ class Parser:
             f"Expected a number, got '{tok.value}'", tok.pos
         )
 
-    def _parse_literal_list(self) -> list[str | int | float | bool]:
+    def _parse_literal_list(self) -> list[str | int | float | bool | None]:
         """'(' literal { ',' literal } [','] ')'  — used by IN / NOT IN."""
         self._expect(TokenKind.LPAREN)
-        items: list[str | int | float | bool] = []
+        items: list[str | int | float | bool | None] = []
         if self._peek().kind == TokenKind.RPAREN:
             self._advance()
             return items

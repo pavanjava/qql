@@ -240,17 +240,35 @@ class Executor:
 
     # ── Statement executors ───────────────────────────────────────────────
 
+    @staticmethod
+    def _is_grpc_not_found_error(error: BaseException) -> bool:
+        """Return True if *error* is a gRPC NOT_FOUND status."""
+        from grpc import RpcError, StatusCode
+        return isinstance(error, RpcError) and error.code() == StatusCode.NOT_FOUND
+
     def _fetch_collection_info(self, name: str):
         """Fetch full CollectionInfo for *name* in a single API call.
 
         Returns the CollectionInfo object when the collection exists, or
-        ``None`` when the collection is not found (HTTP 404).  Any other
-        Qdrant error is re-raised as :class:`QQLRuntimeError`.
+        ``None`` when the collection is not found (HTTP 404 or gRPC NOT_FOUND).
+        Any other Qdrant error is re-raised as :class:`QQLRuntimeError`.
         """
         try:
             return self._client.get_collection(name)
         except UnexpectedResponse as e:
             if e.status_code == 404:
+                return None
+            raise QQLRuntimeError(
+                f"Qdrant error fetching collection '{name}': {e}"
+            ) from e
+        except ValueError as e:
+            if f"Collection {name} not found" in str(e):
+                return None
+            raise QQLRuntimeError(
+                f"Qdrant error fetching collection '{name}': {e}"
+            ) from e
+        except Exception as e:
+            if self._is_grpc_not_found_error(e):
                 return None
             raise QQLRuntimeError(
                 f"Qdrant error fetching collection '{name}': {e}"
@@ -1835,6 +1853,15 @@ class Executor:
 
         # ── Comparison ────────────────────────────────────────────────────
         if isinstance(expr, CompareExpr):
+            if expr.value is None:
+                null_condition = IsNullCondition(is_null=PayloadField(key=expr.field))
+                if expr.op == "=":
+                    return null_condition
+                if expr.op == "!=":
+                    return Filter(must_not=[null_condition])
+                raise QQLRuntimeError(
+                    f"Cannot use operator '{expr.op}' with null for field '{expr.field}'"
+                )
             if expr.op == "=":
                 return FieldCondition(
                     key=expr.field, match=MatchValue(value=expr.value)
@@ -1858,14 +1885,34 @@ class Executor:
 
         # ── IN / NOT IN ───────────────────────────────────────────────────
         if isinstance(expr, InExpr):
-            return FieldCondition(
-                key=expr.field, match=MatchAny(any=list(expr.values))
+            non_nulls = [v for v in expr.values if v is not None]
+            if len(non_nulls) == len(expr.values):
+                return FieldCondition(
+                    key=expr.field, match=MatchAny(any=non_nulls)
+                )
+            null_condition = IsNullCondition(is_null=PayloadField(key=expr.field))
+            if not non_nulls:
+                return null_condition
+            return Filter(
+                should=[
+                    null_condition,
+                    FieldCondition(key=expr.field, match=MatchAny(any=non_nulls)),
+                ]
             )
 
         if isinstance(expr, NotInExpr):
+            non_nulls = [v for v in expr.values if v is not None]
+            null_condition = IsNullCondition(is_null=PayloadField(key=expr.field))
+            if len(non_nulls) != len(expr.values):
+                must_not = [null_condition]
+                if non_nulls:
+                    must_not.append(
+                        FieldCondition(key=expr.field, match=MatchAny(any=non_nulls))
+                    )
+                return Filter(must_not=must_not)
             return FieldCondition(
                 key=expr.field,
-                match=MatchExcept(**{"except": list(expr.values)}),
+                match=MatchExcept(**{"except": non_nulls}),
             )
 
         # ── IS NULL / IS NOT NULL ─────────────────────────────────────────
